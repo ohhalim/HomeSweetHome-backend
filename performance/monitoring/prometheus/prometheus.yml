@@ -1,0 +1,74 @@
+global:
+  scrape_interval: 15s # 기본 스크랩 간격
+  scrape_timeout: 10s
+  evaluation_interval: 15s # 알림 규칙 평가 간격
+
+  external_labels:
+    cluster: 'homesweet-community'
+    env: 'development'
+
+# Alertmanager 설정
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+# 알림 규칙 파일
+rule_files:
+  - 'alerts.yml'
+
+# 스크랩 설정
+scrape_configs:
+  # ===== Prometheus 자체 모니터링 =====
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          service: 'prometheus'
+
+  # ===== Spring Boot 애플리케이션 (Community Domain) =====
+  - job_name: 'homesweet-backend'
+    metrics_path: '/actuator/prometheus'
+    scrape_interval: 10s
+    static_configs:
+      - targets: ['host.docker.internal:8080']
+        labels:
+          application: 'homesweet-back'
+          service: 'community-api'
+          env: 'development'
+
+  # ===== Node Exporter: 시스템 메트릭 =====
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+        labels:
+          service: 'node-exporter'
+
+  # ===== cAdvisor: 컨테이너 메트릭 =====
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+        labels:
+          service: 'cadvisor'
+
+  # ===== Grafana 메트릭 =====
+  - job_name: 'grafana'
+    static_configs:
+      - targets: ['grafana:3000']
+        labels:
+          service: 'grafana'
+
+  # ===== Loki 메트릭 =====
+  - job_name: 'loki'
+    static_configs:
+      - targets: ['loki:3100']
+        labels:
+          service: 'loki'
+
+  # ===== Alertmanager 메트릭 =====
+  - job_name: 'alertmanager'
+    static_configs:
+      - targets: ['alertmanager:9093']
+        labels:
+          service: 'alertmanager'

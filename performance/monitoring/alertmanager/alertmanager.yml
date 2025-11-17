@@ -1,0 +1,185 @@
+global:
+  resolve_timeout: 5m
+  # Slack webhook URL (실제 사용 시 환경변수로 관리)
+  slack_api_url: '${SLACK_WEBHOOK_URL}'
+
+# 알림 템플릿
+templates:
+  - '/etc/alertmanager/templates/*.tmpl'
+
+# 알림 라우팅
+route:
+  # 기본 그룹화 키
+  group_by: ['alertname', 'cluster', 'service']
+
+  # 그룹 대기 시간 (동일 그룹의 알림을 모아서 보내기 위한 대기)
+  group_wait: 10s
+
+  # 그룹 간격 (추가 알림이 발생했을 때 대기 시간)
+  group_interval: 10s
+
+  # 반복 간격 (해결되지 않은 알림을 다시 보내는 간격)
+  repeat_interval: 12h
+
+  # 기본 수신자
+  receiver: 'default'
+
+  # 하위 라우트 (심각도와 카테고리별로 분류)
+  routes:
+    # Critical 알림 - 즉시 발송
+    - match:
+        severity: critical
+      receiver: 'critical-alerts'
+      group_wait: 5s
+      group_interval: 5s
+      repeat_interval: 1h
+      continue: true
+
+    # Warning 알림 - 그룹화해서 발송
+    - match:
+        severity: warning
+      receiver: 'warning-alerts'
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+
+    # 커뮤니티 도메인 특화 알림
+    - match:
+        category: community
+      receiver: 'community-team'
+      group_wait: 20s
+      repeat_interval: 6h
+
+    # 데이터베이스 관련 알림
+    - match:
+        category: database
+      receiver: 'database-team'
+      group_wait: 15s
+      repeat_interval: 2h
+
+    # 리소스 관련 알림
+    - match:
+        category: resources
+      receiver: 'devops-team'
+      group_wait: 30s
+      repeat_interval: 6h
+
+# 수신자 설정
+receivers:
+  # 기본 수신자 (콘솔 로그만)
+  - name: 'default'
+    webhook_configs:
+      - url: 'http://localhost:5001/webhook'
+        send_resolved: true
+
+  # Critical 알림 - 여러 채널로 발송
+  - name: 'critical-alerts'
+    # Slack 알림
+    slack_configs:
+      - channel: '#alerts-critical'
+        title: '🚨 Critical Alert'
+        text: |
+          *Alert:* {{ .GroupLabels.alertname }}
+          *Severity:* {{ .CommonLabels.severity }}
+          *Summary:* {{ .CommonAnnotations.summary }}
+          *Description:* {{ .CommonAnnotations.description }}
+          *Time:* {{ .StartsAt.Format "2006-01-02 15:04:05 MST" }}
+        send_resolved: true
+        username: 'Alertmanager'
+        icon_emoji: ':rotating_light:'
+
+    # 이메일 알림 (설정 필요)
+    # email_configs:
+    #   - to: 'team-lead@example.com'
+    #     from: 'alertmanager@example.com'
+    #     smarthost: 'smtp.gmail.com:587'
+    #     auth_username: 'alertmanager@example.com'
+    #     auth_password: '${SMTP_PASSWORD}'
+    #     headers:
+    #       subject: '[CRITICAL] {{ .GroupLabels.alertname }}'
+
+    # PagerDuty 알림 (설정 필요)
+    # pagerduty_configs:
+    #   - service_key: '${PAGERDUTY_SERVICE_KEY}'
+
+  # Warning 알림
+  - name: 'warning-alerts'
+    slack_configs:
+      - channel: '#alerts-warning'
+        title: '⚠️ Warning Alert'
+        text: |
+          *Alert:* {{ .GroupLabels.alertname }}
+          *Severity:* {{ .CommonLabels.severity }}
+          *Summary:* {{ .CommonAnnotations.summary }}
+          *Description:* {{ .CommonAnnotations.description }}
+          *Time:* {{ .StartsAt.Format "2006-01-02 15:04:05 MST" }}
+        send_resolved: true
+        username: 'Alertmanager'
+        icon_emoji: ':warning:'
+
+  # 커뮤니티 팀 알림
+  - name: 'community-team'
+    slack_configs:
+      - channel: '#community-alerts'
+        title: '📢 Community Domain Alert'
+        text: |
+          *Alert:* {{ .GroupLabels.alertname }}
+          *Service:* {{ .CommonLabels.service }}
+          *Summary:* {{ .CommonAnnotations.summary }}
+          *Description:* {{ .CommonAnnotations.description }}
+          *Time:* {{ .StartsAt.Format "2006-01-02 15:04:05 MST" }}
+        send_resolved: true
+        username: 'Community Bot'
+        icon_emoji: ':house:'
+
+  # 데이터베이스 팀 알림
+  - name: 'database-team'
+    slack_configs:
+      - channel: '#database-alerts'
+        title: '🗄️ Database Alert'
+        text: |
+          *Alert:* {{ .GroupLabels.alertname }}
+          *Summary:* {{ .CommonAnnotations.summary }}
+          *Description:* {{ .CommonAnnotations.description }}
+          *Time:* {{ .StartsAt.Format "2006-01-02 15:04:05 MST" }}
+        send_resolved: true
+        username: 'DB Monitor'
+        icon_emoji: ':floppy_disk:'
+
+  # DevOps 팀 알림
+  - name: 'devops-team'
+    slack_configs:
+      - channel: '#devops-alerts'
+        title: '🔧 Infrastructure Alert'
+        text: |
+          *Alert:* {{ .GroupLabels.alertname }}
+          *Resource:* {{ .CommonLabels.instance }}
+          *Summary:* {{ .CommonAnnotations.summary }}
+          *Description:* {{ .CommonAnnotations.description }}
+          *Time:* {{ .StartsAt.Format "2006-01-02 15:04:05 MST" }}
+        send_resolved: true
+        username: 'DevOps Bot'
+        icon_emoji: ':robot_face:'
+
+# 알림 억제 규칙 (중복 알림 방지)
+inhibit_rules:
+  # ApplicationDown이 발생하면 다른 모든 알림 억제
+  - source_match:
+      alertname: 'ApplicationDown'
+    target_match_re:
+      alertname: '.*'
+    equal: ['instance']
+
+  # Critical 알림이 발생하면 같은 서비스의 Warning 알림 억제
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'service', 'instance']
+
+  # HighMemoryUsage가 발생하면 HighGCTime 알림 억제 (연관성 있는 알림)
+  - source_match:
+      alertname: 'HighMemoryUsage'
+    target_match:
+      alertname: 'HighGCTime'
+    equal: ['instance']

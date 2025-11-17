@@ -1,0 +1,233 @@
+groups:
+  # ===== 애플리케이션 건강 상태 알림 =====
+  - name: application_health
+    interval: 30s
+    rules:
+      # 애플리케이션 다운 감지
+      - alert: ApplicationDown
+        expr: up{job="homesweet-backend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          category: availability
+        annotations:
+          summary: "HomeSweetHome Backend is down"
+          description: "The application {{ $labels.instance }} has been down for more than 1 minute."
+
+      # 높은 HTTP 에러율
+      - alert: HighHttpErrorRate
+        expr: |
+          (
+            rate(http_server_requests_seconds_count{status=~"5.."}[5m])
+            /
+            rate(http_server_requests_seconds_count[5m])
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          category: errors
+        annotations:
+          summary: "High HTTP 5xx error rate"
+          description: "More than 5% of requests are returning 5xx errors for {{ $labels.uri }}"
+
+      # 느린 응답 시간
+      - alert: SlowResponseTime
+        expr: |
+          histogram_quantile(0.95,
+            rate(http_server_requests_seconds_bucket{uri=~"/api/v1/community/.*"}[5m])
+          ) > 1
+        for: 5m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "Slow API response time"
+          description: "95th percentile response time is above 1s for {{ $labels.uri }}"
+
+  # ===== 커뮤니티 도메인 특화 알림 =====
+  - name: community_domain
+    interval: 30s
+    rules:
+      # 게시글 생성 실패율 증가
+      - alert: HighPostCreationFailureRate
+        expr: |
+          (
+            rate(http_server_requests_seconds_count{uri="/api/v1/community/posts",method="POST",status=~"4..|5.."}[5m])
+            /
+            rate(http_server_requests_seconds_count{uri="/api/v1/community/posts",method="POST"}[5m])
+          ) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          category: community
+        annotations:
+          summary: "High post creation failure rate"
+          description: "More than 10% of post creation requests are failing"
+
+      # 댓글 작성 지연
+      - alert: CommentCreationSlow
+        expr: |
+          histogram_quantile(0.95,
+            rate(http_server_requests_seconds_bucket{uri=~"/api/v1/community/posts/.*/comments",method="POST"}[5m])
+          ) > 2
+        for: 5m
+        labels:
+          severity: warning
+          category: community
+        annotations:
+          summary: "Comment creation is slow"
+          description: "95th percentile comment creation time is above 2s"
+
+      # 높은 조회수 증가 요청 실패율 (동시성 문제 가능성)
+      - alert: ViewsIncreaseFailureRate
+        expr: |
+          (
+            rate(http_server_requests_seconds_count{uri=~"/api/v1/community/posts/.*/views",status=~"4..|5.."}[5m])
+            /
+            rate(http_server_requests_seconds_count{uri=~"/api/v1/community/posts/.*/views"}[5m])
+          ) > 0.05
+        for: 3m
+        labels:
+          severity: critical
+          category: community
+        annotations:
+          summary: "High views increase failure rate"
+          description: "More than 5% of view increase requests are failing - possible concurrency issue"
+
+  # ===== JVM 메트릭 알림 =====
+  - name: jvm_metrics
+    interval: 30s
+    rules:
+      # 높은 메모리 사용률
+      - alert: HighMemoryUsage
+        expr: |
+          (
+            jvm_memory_used_bytes{area="heap"}
+            /
+            jvm_memory_max_bytes{area="heap"}
+          ) > 0.85
+        for: 5m
+        labels:
+          severity: warning
+          category: resources
+        annotations:
+          summary: "High JVM heap memory usage"
+          description: "JVM heap memory usage is above 85% on {{ $labels.instance }}"
+
+      # GC 시간이 너무 긴 경우
+      - alert: HighGCTime
+        expr: |
+          rate(jvm_gc_pause_seconds_sum[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          category: resources
+        annotations:
+          summary: "High GC pause time"
+          description: "GC is taking more than 10% of time on {{ $labels.instance }}"
+
+      # 스레드 데드락 감지
+      - alert: ThreadDeadlock
+        expr: |
+          jvm_threads_deadlocked > 0
+        for: 1m
+        labels:
+          severity: critical
+          category: resources
+        annotations:
+          summary: "Thread deadlock detected"
+          description: "{{ $value }} threads are in deadlock on {{ $labels.instance }}"
+
+  # ===== 데이터베이스 연결 알림 =====
+  - name: database_connections
+    interval: 30s
+    rules:
+      # 커넥션 풀 고갈
+      - alert: DatabaseConnectionPoolExhausted
+        expr: |
+          (
+            hikaricp_connections_active
+            /
+            hikaricp_connections_max
+          ) > 0.9
+        for: 2m
+        labels:
+          severity: critical
+          category: database
+        annotations:
+          summary: "Database connection pool nearly exhausted"
+          description: "Database connection pool is over 90% utilized"
+
+      # 느린 데이터베이스 쿼리
+      - alert: SlowDatabaseQueries
+        expr: |
+          histogram_quantile(0.95,
+            rate(hikaricp_connections_acquire_seconds_bucket[5m])
+          ) > 1
+        for: 5m
+        labels:
+          severity: warning
+          category: database
+        annotations:
+          summary: "Slow database connection acquisition"
+          description: "95th percentile time to acquire connection is above 1s"
+
+  # ===== 시스템 리소스 알림 =====
+  - name: system_resources
+    interval: 30s
+    rules:
+      # 높은 CPU 사용률
+      - alert: HighCPUUsage
+        expr: |
+          100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+          category: resources
+        annotations:
+          summary: "High CPU usage"
+          description: "CPU usage is above 80% on {{ $labels.instance }}"
+
+      # 높은 메모리 사용률
+      - alert: HighSystemMemoryUsage
+        expr: |
+          (
+            1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)
+          ) > 0.85
+        for: 5m
+        labels:
+          severity: warning
+          category: resources
+        annotations:
+          summary: "High system memory usage"
+          description: "System memory usage is above 85% on {{ $labels.instance }}"
+
+      # 디스크 공간 부족
+      - alert: LowDiskSpace
+        expr: |
+          (
+            1 - (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"})
+          ) > 0.85
+        for: 5m
+        labels:
+          severity: warning
+          category: resources
+        annotations:
+          summary: "Low disk space"
+          description: "Disk usage is above 85% on {{ $labels.instance }}"
+
+  # ===== 로그 에러 알림 (Loki 연동) =====
+  - name: log_errors
+    interval: 1m
+    rules:
+      # 높은 에러 로그 발생률
+      - alert: HighErrorLogRate
+        expr: |
+          sum(rate({job="homesweet-backend",level="ERROR"}[5m])) > 10
+        for: 3m
+        labels:
+          severity: warning
+          category: logs
+        annotations:
+          summary: "High error log rate"
+          description: "More than 10 error logs per second in the last 5 minutes"
