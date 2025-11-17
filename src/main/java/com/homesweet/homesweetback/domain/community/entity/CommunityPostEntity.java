@@ -20,7 +20,14 @@ import java.time.LocalDateTime;
  */
 
 @Entity
-@Table(name = "community_posts")
+@Table(name = "community_posts", indexes = {
+    @Index(name = "idx_author_created", columnList = "user_id, created_at DESC"),
+    @Index(name = "idx_category_created", columnList = "category, created_at DESC"),
+    @Index(name = "idx_is_deleted", columnList = "is_deleted"),
+    @Index(name = "idx_like_count", columnList = "like_count DESC"),
+    @Index(name = "idx_view_count", columnList = "view_count DESC"),
+    @Index(name = "idx_created_at", columnList = "created_at DESC")
+})
 @EntityListeners(AuditingEntityListener.class)
 @Getter
 @Builder

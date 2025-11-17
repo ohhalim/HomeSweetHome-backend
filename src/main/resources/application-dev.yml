@@ -11,6 +11,28 @@ spring:
     driver-class-name: com.mysql.cj.jdbc.Driver
     username: user
     password: password
+    # HikariCP 커넥션 풀 최적화
+    hikari:
+      maximum-pool-size: 20           # 최대 커넥션 수
+      minimum-idle: 10                # 최소 유휴 커넥션 수
+      connection-timeout: 30000       # 커넥션 획득 타임아웃 (30초)
+      idle-timeout: 600000            # 유휴 커넥션 타임아웃 (10분)
+      max-lifetime: 1800000           # 커넥션 최대 수명 (30분)
+      connection-test-query: SELECT 1
+      pool-name: HikariCP-Community
+      auto-commit: true
+      # MySQL 최적화 설정
+      data-source-properties:
+        cachePrepStmts: true
+        prepStmtCacheSize: 250
+        prepStmtCacheSqlLimit: 2048
+        useServerPrepStmts: true
+        useLocalSessionState: true
+        rewriteBatchedStatements: true
+        cacheResultSetMetadata: true
+        cacheServerConfiguration: true
+        elideSetAutoCommits: true
+        maintainTimeStats: false
   jpa:
     hibernate:
       ddl-auto: none
@@ -18,6 +40,18 @@ spring:
     properties:
       hibernate:
         format_sql: true
+        # 배치 처리 최적화
+        jdbc:
+          batch_size: 50
+          fetch_size: 100
+        order_inserts: true
+        order_updates: true
+        # 쿼리 캐시 활성화
+        cache:
+          use_second_level_cache: false  # Redis로 대체
+          use_query_cache: false
+        # 성능 통계
+        generate_statistics: false
   security:
     oauth2:
       client:
@@ -41,6 +75,16 @@ spring:
       port: 6379
       password:
       timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 20      # 최대 활성 커넥션
+          max-idle: 10        # 최대 유휴 커넥션
+          min-idle: 5         # 최소 유휴 커넥션
+          max-wait: 3000ms    # 커넥션 대기 시간
+  cache:
+    type: caffeine
+    caffeine:
+      spec: maximumSize=10000,expireAfterWrite=5m,recordStats
 
 logging:
   level:
@@ -93,4 +137,15 @@ management:
     metrics:
       export:
         enabled: true
+
+# Redisson 분산 락 설정
+redisson:
+  address: redis://localhost:6379
+  password:
+  database: 0
+
+# ML 서비스 설정
+ml-service:
+  base-url: http://localhost:8000
+  timeout: 10
 

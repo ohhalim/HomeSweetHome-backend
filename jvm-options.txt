@@ -1,0 +1,110 @@
+# JVM Performance Options for HomeSweetHome Backend
+# 커뮤니티 도메인 성능 최적화를 위한 JVM 설정
+#
+# 사용법:
+# java @jvm-options.txt -jar homesweet-back.jar
+# 또는 JAVA_OPTS 환경변수로 설정
+
+# ========== Heap 메모리 설정 ==========
+# 초기 힙 크기와 최대 힙 크기를 동일하게 설정하여 GC 성능 향상
+-Xms2g
+-Xmx2g
+
+# ========== GC 설정 (G1GC) ==========
+# G1GC 사용 (Java 9+ 기본값, 대용량 힙에 최적)
+-XX:+UseG1GC
+
+# G1 힙 영역 크기 (기본값: 2048, 범위: 1-32MB)
+-XX:G1HeapRegionSize=16m
+
+# 최대 GC 일시 정지 목표 시간 (밀리초)
+-XX:MaxGCPauseMillis=200
+
+# GC 스레드 수 (CPU 코어 수에 따라 조정)
+-XX:ParallelGCThreads=4
+-XX:ConcGCThreads=2
+
+# 혼합 GC 발생 임계값 (힙의 45%가 Old 영역일 때 발생)
+-XX:InitiatingHeapOccupancyPercent=45
+
+# ========== 메타스페이스 설정 ==========
+# 메타스페이스 초기 크기 및 최대 크기
+-XX:MetaspaceSize=256m
+-XX:MaxMetaspaceSize=512m
+
+# ========== 성능 최적화 ==========
+# JIT 컴파일러 최적화
+-XX:+TieredCompilation
+-XX:TieredStopAtLevel=4
+
+# String 중복 제거 (메모리 절약)
+-XX:+UseStringDeduplication
+
+# 대용량 페이지 사용 (Linux)
+-XX:+UseTransparentHugePages
+
+# ========== 에러 핸들링 ==========
+# OOM 발생 시 힙 덤프 생성
+-XX:+HeapDumpOnOutOfMemoryError
+-XX:HeapDumpPath=logs/heap-dumps/
+
+# OOM 발생 시 실행할 스크립트 (선택사항)
+# -XX:OnOutOfMemoryError="sh oom-handler.sh"
+
+# ========== GC 로깅 (Java 11+) ==========
+# GC 로그 활성화
+-Xlog:gc*:file=logs/gc/gc.log:time,uptime,level,tags:filecount=10,filesize=10M
+
+# ========== 성능 모니터링 ==========
+# JMX 원격 모니터링 활성화 (프로덕션에서는 보안 설정 필요)
+# -Dcom.sun.management.jmxremote
+# -Dcom.sun.management.jmxremote.port=9010
+# -Dcom.sun.management.jmxremote.authenticate=false
+# -Dcom.sun.management.jmxremote.ssl=false
+
+# ========== 기타 성능 옵션 ==========
+# DNS 캐싱 (초 단위, -1은 무제한)
+-Dsun.net.inetaddr.ttl=60
+-Dsun.net.inetaddr.negative.ttl=10
+
+# 파일 인코딩
+-Dfile.encoding=UTF-8
+
+# 타임존 설정
+-Duser.timezone=Asia/Seoul
+
+# ========== Spring Boot 최적화 ==========
+# Spring Boot의 게으른 초기화 활성화 (시작 시간 단축)
+# -Dspring.main.lazy-initialization=true
+
+# ========== 프로덕션 권장 설정 ==========
+# 아래 설정들은 프로덕션 환경에서만 활성화 권장
+
+# 서버 모드 (기본값, 명시적 설정)
+-server
+
+# 역참조 감지 비활성화 (성능 향상, 디버깅 시에는 활성화)
+# -XX:-OmitStackTraceInFastThrow
+
+# 압축된 OOP(Ordinary Object Pointer) 사용
+-XX:+UseCompressedOops
+
+# 압축된 클래스 포인터 사용
+-XX:+UseCompressedClassPointers
+
+# ========== 환경별 힙 크기 가이드 ==========
+#
+# 개발 환경:
+#   -Xms512m -Xmx1g
+#
+# 테스트 환경:
+#   -Xms1g -Xmx2g
+#
+# 스테이징/프로덕션:
+#   -Xms2g -Xmx4g (중간 트래픽)
+#   -Xms4g -Xmx8g (높은 트래픽)
+#
+# 컨테이너 환경 (Docker/Kubernetes):
+#   -XX:MaxRAMPercentage=75.0
+#   -XX:InitialRAMPercentage=50.0
+#   (컨테이너 메모리의 75%를 힙으로 사용)
