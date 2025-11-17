@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  # FastAPI ML Service
+  ml-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: homesweet-ml-service
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./app:/app/app
+      - ./trained_models:/app/trained_models
+      - ./data:/app/data
+      - ./logs:/app/logs
+    environment:
+      - PYTHONUNBUFFERED=1
+      - ENV=development
+    networks:
+      - homesweet-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Redis (캐싱 및 세션 관리)
+  redis:
+    image: redis:7-alpine
+    container_name: homesweet-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - homesweet-network
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+networks:
+  homesweet-network:
+    driver: bridge
+
+volumes:
+  redis_data:
