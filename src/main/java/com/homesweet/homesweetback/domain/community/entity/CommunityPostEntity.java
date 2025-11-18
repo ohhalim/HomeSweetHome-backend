@@ -26,7 +26,10 @@ import java.time.LocalDateTime;
     @Index(name = "idx_is_deleted", columnList = "is_deleted"),
     @Index(name = "idx_like_count", columnList = "like_count DESC"),
     @Index(name = "idx_view_count", columnList = "view_count DESC"),
-    @Index(name = "idx_created_at", columnList = "created_at DESC")
+    @Index(name = "idx_created_at", columnList = "created_at DESC"),
+    @Index(name = "idx_subreddit_score", columnList = "subreddit_id, score DESC, created_at DESC"),
+    @Index(name = "idx_subreddit_hot", columnList = "subreddit_id, created_at DESC"),
+    @Index(name = "idx_score", columnList = "score DESC")
 })
 @EntityListeners(AuditingEntityListener.class)
 @Getter
@@ -43,6 +46,10 @@ public class CommunityPostEntity extends BaseEntity {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
     private User author;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "subreddit_id")
+    private SubredditEntity subreddit;
 
     @Column(nullable = false, length = 100)
     private String title;
@@ -64,6 +71,21 @@ public class CommunityPostEntity extends BaseEntity {
     @Column(nullable = false)
     @Builder.Default
     private Integer commentCount = 0;
+
+    /**
+     * Reddit-style voting system
+     */
+    @Column(nullable = false)
+    @Builder.Default
+    private Integer upvoteCount = 0;
+
+    @Column(nullable = false)
+    @Builder.Default
+    private Integer downvoteCount = 0;
+
+    @Column(nullable = false)
+    @Builder.Default
+    private Integer score = 0;  // upvoteCount - downvoteCount
 
     @Column(nullable = false)
     @Builder.Default
@@ -120,4 +142,34 @@ public class CommunityPostEntity extends BaseEntity {
      */
     public void increaseCommentCount() { this.commentCount++; }
     public void decreaseCommentCount() { this.commentCount--; }
+
+    /**
+     * Reddit-style 투표 관리
+     */
+    public void increaseUpvoteCount() {
+        this.upvoteCount++;
+        this.score = this.upvoteCount - this.downvoteCount;
+    }
+
+    public void decreaseUpvoteCount() {
+        this.upvoteCount--;
+        this.score = this.upvoteCount - this.downvoteCount;
+    }
+
+    public void increaseDownvoteCount() {
+        this.downvoteCount++;
+        this.score = this.upvoteCount - this.downvoteCount;
+    }
+
+    public void decreaseDownvoteCount() {
+        this.downvoteCount--;
+        this.score = this.upvoteCount - this.downvoteCount;
+    }
+
+    /**
+     * 점수 재계산 (동기화용)
+     */
+    public void recalculateScore() {
+        this.score = this.upvoteCount - this.downvoteCount;
+    }
 }

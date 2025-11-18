@@ -10,6 +10,8 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -45,4 +47,32 @@ public interface CommunityPostRepository extends JpaRepository<CommunityPostEnti
     // 트렌딩 게시글 조회 (조회수 + 좋아요 조합, N+1 방지)
     @Query("SELECT p FROM CommunityPostEntity p JOIN FETCH p.author WHERE p.isDeleted = false ORDER BY (p.viewCount + p.likeCount * 2) DESC, p.createdAt DESC")
     Page<CommunityPostEntity> findTrendingPosts(Pageable pageable);
+
+    // ===== Reddit-style 정렬 쿼리 메서드 =====
+
+    // 서브레딧별 게시글 조회
+    @EntityGraph(attributePaths = {"author", "subreddit"})
+    List<CommunityPostEntity> findBySubreddit_SubredditIdAndIsDeletedFalse(Long subredditId);
+
+    // 모든 게시글 조회 (정렬용)
+    @EntityGraph(attributePaths = {"author", "subreddit"})
+    List<CommunityPostEntity> findByIsDeletedFalse();
+
+    // 서브레딧 + 기간별 게시글 조회
+    @EntityGraph(attributePaths = {"author", "subreddit"})
+    List<CommunityPostEntity> findBySubreddit_SubredditIdAndIsDeletedFalseAndCreatedAtAfter(
+        Long subredditId, LocalDateTime since);
+
+    // 기간별 게시글 조회
+    @EntityGraph(attributePaths = {"author", "subreddit"})
+    List<CommunityPostEntity> findByIsDeletedFalseAndCreatedAtAfter(LocalDateTime since);
+
+    // NEW 정렬 (서브레딧별)
+    @EntityGraph(attributePaths = {"author", "subreddit"})
+    Page<CommunityPostEntity> findBySubreddit_SubredditIdAndIsDeletedFalseOrderByCreatedAtDesc(
+        Long subredditId, Pageable pageable);
+
+    // NEW 정렬 (전체)
+    @EntityGraph(attributePaths = {"author", "subreddit"})
+    Page<CommunityPostEntity> findByIsDeletedFalseOrderByCreatedAtDesc(Pageable pageable);
 }

@@ -56,6 +56,21 @@ public class CommunityCommentEntity extends BaseEntity {
     @Builder.Default
     private Integer likeCount = 0;
 
+    /**
+     * Reddit-style voting system
+     */
+    @Column(nullable = false)
+    @Builder.Default
+    private Integer upvoteCount = 0;
+
+    @Column(nullable = false)
+    @Builder.Default
+    private Integer downvoteCount = 0;
+
+    @Column(nullable = false)
+    @Builder.Default
+    private Integer score = 0;  // upvoteCount - downvoteCount
+
     @Column(nullable = false)
     @Builder.Default
     private Boolean isModified = false;
@@ -98,4 +113,34 @@ public class CommunityCommentEntity extends BaseEntity {
      */
     public void increaseLikeCount() { this.likeCount++; }
     public void decreaseLikeCount() { this.likeCount--; }
+
+    /**
+     * Reddit-style 투표 관리
+     */
+    public void increaseUpvoteCount() {
+        this.upvoteCount++;
+        this.score = this.upvoteCount - this.downvoteCount;
+    }
+
+    public void decreaseUpvoteCount() {
+        this.upvoteCount--;
+        this.score = this.upvoteCount - this.downvoteCount;
+    }
+
+    public void increaseDownvoteCount() {
+        this.downvoteCount++;
+        this.score = this.upvoteCount - this.downvoteCount;
+    }
+
+    public void decreaseDownvoteCount() {
+        this.downvoteCount--;
+        this.score = this.upvoteCount - this.downvoteCount;
+    }
+
+    /**
+     * 점수 재계산 (동기화용)
+     */
+    public void recalculateScore() {
+        this.score = this.upvoteCount - this.downvoteCount;
+    }
 }

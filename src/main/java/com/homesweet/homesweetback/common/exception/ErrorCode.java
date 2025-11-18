@@ -60,6 +60,15 @@ public enum ErrorCode {
     COMMUNITY_COMMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "해당하는 댓글을 찾을 수 없습니다"),
     COMMUNITY_COMMENT_FORBIDDEN(HttpStatus.FORBIDDEN, "본인이 작성한 댓글만 수정/삭제할 수 있습니다"),
 
+    // Subreddit
+    SUBREDDIT_NOT_FOUND(HttpStatus.NOT_FOUND, "해당하는 서브레딧을 찾을 수 없습니다"),
+    SUBREDDIT_NAME_DUPLICATED(HttpStatus.CONFLICT, "이미 존재하는 서브레딧 이름입니다"),
+    SUBREDDIT_NAME_INVALID(HttpStatus.BAD_REQUEST, "서브레딧 이름은 영문, 숫자, 언더스코어만 사용 가능하며 3-21자여야 합니다"),
+    SUBREDDIT_ALREADY_SUBSCRIBED(HttpStatus.CONFLICT, "이미 구독 중인 서브레딧입니다"),
+    SUBREDDIT_NOT_SUBSCRIBED(HttpStatus.BAD_REQUEST, "구독하지 않은 서브레딧입니다"),
+    SUBREDDIT_ALREADY_MODERATOR(HttpStatus.CONFLICT, "이미 모더레이터로 등록된 사용자입니다"),
+    SUBREDDIT_MODERATOR_PERMISSION_DENIED(HttpStatus.FORBIDDEN, "모더레이터 권한이 없습니다"),
+
     // Notification
     NOTIFICATION_NOT_FOUND(HttpStatus.NOT_FOUND, "알림을 찾을 수 없습니다"),
     NOTIFICATION_ACCESS_DENIED(HttpStatus.FORBIDDEN, "알림에 접근할 권한이 없습니다"),
