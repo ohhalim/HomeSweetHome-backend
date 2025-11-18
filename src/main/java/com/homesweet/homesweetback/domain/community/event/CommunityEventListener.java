@@ -78,7 +78,7 @@ public class CommunityEventListener {
 
     /**
      * 댓글 생성 이벤트 처리
-     * 
+     *
      * 트랜잭션 커밋 후 실행되며, 다음 작업을 수행:
      * - 게시글 작성자에게 알림 전송
      * - 부모 댓글 작성자에게 알림 전송 (대댓글인 경우)
@@ -88,16 +88,83 @@ public class CommunityEventListener {
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void handleCommentCreated(CommentCreatedEvent event) {
         try {
-            log.info("Comment created - commentId: {}, postId: {}, userId: {}, parentCommentId: {}", 
+            log.info("Comment created - commentId: {}, postId: {}, userId: {}, parentCommentId: {}",
                 event.getCommentId(), event.getPostId(), event.getUserId(), event.getParentCommentId());
-            
+
             // TODO: 추가 처리
             // - 게시글 작성자에게 새 댓글 알림
             // - 대댓글인 경우 부모 댓글 작성자에게 알림
             // - 활발한 게시글 통계 업데이트
-            
+
         } catch (Exception e) {
             log.error("Failed to handle CommentCreatedEvent: {}", event.getCommentId(), e);
+        }
+    }
+
+    /**
+     * 게시글 투표 이벤트 처리
+     *
+     * Reddit-style 투표 시스템
+     * - 카르마 캐시 무효화
+     * - 인기 게시글 랭킹 업데이트
+     */
+    @Async("communityEventExecutor")
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void handlePostVoted(PostVotedEvent event) {
+        try {
+            log.info("Post voted - postId: {}, userId: {}, voteType: {}, currentScore: {}",
+                event.getPostId(), event.getUserId(), event.getVoteType(), event.getCurrentScore());
+
+            // TODO: 추가 처리
+            // - 카르마 캐시 무효화
+            // - HOT 알고리즘 캐시 업데이트
+            // - 인기 게시글 랭킹 갱신
+
+        } catch (Exception e) {
+            log.error("Failed to handle PostVotedEvent: {}", event.getPostId(), e);
+        }
+    }
+
+    /**
+     * 서브레딧 생성 이벤트 처리
+     */
+    @Async("communityEventExecutor")
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void handleSubredditCreated(SubredditCreatedEvent event) {
+        try {
+            log.info("Subreddit created - subredditId: {}, name: {}, creatorId: {}",
+                event.getSubredditId(), event.getName(), event.getCreatorId());
+
+            // TODO: 추가 처리
+            // - 서브레딧 생성 알림
+            // - 추천 서브레딧 목록 업데이트
+
+        } catch (Exception e) {
+            log.error("Failed to handle SubredditCreatedEvent: {}", event.getSubredditId(), e);
+        }
+    }
+
+    /**
+     * 서브레딧 구독 이벤트 처리
+     */
+    @Async("communityEventExecutor")
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void handleSubredditSubscribed(SubredditSubscribedEvent event) {
+        try {
+            if (event.isSubscribe()) {
+                log.info("Subreddit subscribed - subredditId: {}, userId: {}",
+                    event.getSubredditId(), event.getUserId());
+            } else {
+                log.info("Subreddit unsubscribed - subredditId: {}, userId: {}",
+                    event.getSubredditId(), event.getUserId());
+            }
+
+            // TODO: 추가 처리
+            // - 추천 알고리즘 개인화 업데이트
+            // - 피드 캐시 무효화
+
+        } catch (Exception e) {
+            log.error("Failed to handle SubredditSubscribedEvent: {}", event.getSubredditId(), e);
         }
     }
 }

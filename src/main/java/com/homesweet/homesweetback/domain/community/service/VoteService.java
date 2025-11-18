@@ -6,10 +6,12 @@ import com.homesweet.homesweetback.domain.auth.entity.User;
 import com.homesweet.homesweetback.domain.auth.repository.UserRepository;
 import com.homesweet.homesweetback.domain.community.dto.exception.CommunityException;
 import com.homesweet.homesweetback.domain.community.entity.*;
+import com.homesweet.homesweetback.domain.community.event.PostVotedEvent;
 import com.homesweet.homesweetback.domain.community.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -40,6 +42,7 @@ public class VoteService {
     private final CommentVoteRepository commentVoteRepository;
     private final UserRepository userRepository;
     private final RedisTemplate<String, String> redisTemplate;
+    private final ApplicationEventPublisher eventPublisher;
 
     private static final String POST_VOTE_KEY_PREFIX = "community:post:vote:";
     private static final String COMMENT_VOTE_KEY_PREFIX = "community:comment:vote:";
@@ -87,6 +90,11 @@ public class VoteService {
 
         // Redis 캐시 업데이트
         updatePostVoteCache(postId, post);
+
+        // 투표 이벤트 발행
+        eventPublisher.publishEvent(new PostVotedEvent(
+                this, postId, userId, voteType, post.getScore()
+        ));
     }
 
     /**
