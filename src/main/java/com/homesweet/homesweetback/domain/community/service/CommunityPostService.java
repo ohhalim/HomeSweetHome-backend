@@ -8,12 +8,14 @@ import com.homesweet.homesweetback.domain.community.dto.CommunityPostResponse;
 import com.homesweet.homesweetback.domain.community.dto.exception.CommunityException;
 import com.homesweet.homesweetback.domain.community.entity.CommunityImageEntity;
 import com.homesweet.homesweetback.domain.community.entity.CommunityPostEntity;
+import com.homesweet.homesweetback.domain.community.event.PostCreatedEvent;
 import com.homesweet.homesweetback.domain.community.repository.CommunityImageRepository;
 import com.homesweet.homesweetback.domain.community.repository.CommunityPostRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.cache.annotation.Caching;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -38,6 +40,7 @@ public class CommunityPostService {
     private final CommunityImageRepository imageRepository;
     private final UserRepository userRepository;
     private final CommunityImageUploader imageUploader;
+    private final ApplicationEventPublisher eventPublisher;
 
     /**
      * 게시글 작성
@@ -73,6 +76,15 @@ public class CommunityPostService {
                 );
             }
         }
+
+        // 게시글 생성 이벤트 발행
+        eventPublisher.publishEvent(new PostCreatedEvent(
+            this,
+            savedPost.getPostId(),
+            userId,
+            savedPost.getTitle(),
+            savedPost.getCategory()
+        ));
 
         return CommunityPostResponse.from(savedPost, imageUrls);
     }

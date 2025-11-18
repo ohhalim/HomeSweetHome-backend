@@ -9,6 +9,7 @@ import com.homesweet.homesweetback.domain.community.entity.CommunityCommentEntit
 import com.homesweet.homesweetback.domain.community.entity.CommunityCommentLikeEntity;
 import com.homesweet.homesweetback.domain.community.entity.CommunityPostEntity;
 import com.homesweet.homesweetback.domain.community.entity.CommunityPostLikeEntity;
+import com.homesweet.homesweetback.domain.community.event.PostLikedEvent;
 import com.homesweet.homesweetback.domain.community.repository.CommunityCommentLikeRepository;
 import com.homesweet.homesweetback.domain.community.repository.CommunityCommentRepository;
 import com.homesweet.homesweetback.domain.community.repository.CommunityPostLikeRepository;
@@ -18,6 +19,7 @@ import com.homesweet.homesweetback.domain.notification.service.NotificationSendS
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -50,6 +52,7 @@ public class CommunityCountService {
     private final UserRepository userRepository;
     private final NotificationSendService notificationSendService;
     private final RedisTemplate<String, String> redisTemplate;
+    private final ApplicationEventPublisher eventPublisher;
 
     private static final String VIEW_COUNT_KEY_PREFIX = "community:post:views:";
     private static final String LIKE_COUNT_KEY_PREFIX = "community:post:likes:";
@@ -166,6 +169,9 @@ public class CommunityCountService {
             // Redis 카운터 감소
             redisTemplate.opsForValue().decrement(likeCountKey);
 
+            // 좋아요 취소 이벤트 발행
+            eventPublisher.publishEvent(new PostLikedEvent(this, postId, userId, false));
+
             log.debug("Post like removed: post={}, user={}", postId, userId);
         } else {
             // 좋아요 추가
@@ -188,6 +194,9 @@ public class CommunityCountService {
                             .postId(post.getPostId())
                             .postTitle(post.getTitle())
                             .build());
+
+            // 좋아요 이벤트 발행
+            eventPublisher.publishEvent(new PostLikedEvent(this, postId, userId, true));
 
             log.debug("Post like added: post={}, user={}", postId, userId);
         }

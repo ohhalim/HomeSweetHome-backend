@@ -92,6 +92,45 @@ dependencies {
     // WebFlux (for reactive WebClient)
     implementation 'org.springframework.boot:spring-boot-starter-webflux'
 
+    // Resilience4j (Circuit Breaker, Rate Limiter, Retry, Bulkhead)
+    implementation 'org.springframework.boot:spring-boot-starter-aop'
+    implementation 'io.github.resilience4j:resilience4j-spring-boot3:2.1.0'
+    implementation 'io.github.resilience4j:resilience4j-circuitbreaker:2.1.0'
+    implementation 'io.github.resilience4j:resilience4j-ratelimiter:2.1.0'
+    implementation 'io.github.resilience4j:resilience4j-retry:2.1.0'
+    implementation 'io.github.resilience4j:resilience4j-bulkhead:2.1.0'
+    implementation 'io.github.resilience4j:resilience4j-micrometer:2.1.0'
+
+    // Bucket4j (Rate Limiting with Redis)
+    implementation 'com.bucket4j:bucket4j-core:8.7.0'
+    implementation 'com.bucket4j:bucket4j-redis:8.7.0'
+
+    // Kafka (Event-Driven Architecture)
+    implementation 'org.springframework.kafka:spring-kafka'
+
+    // Micrometer Tracing (Distributed Tracing)
+    implementation 'io.micrometer:micrometer-tracing-bridge-brave'
+    implementation 'io.zipkin.reporter2:zipkin-reporter-brave'
+
+    // Testcontainers (Integration Tests)
+    testImplementation 'org.testcontainers:testcontainers:1.19.3'
+    testImplementation 'org.testcontainers:junit-jupiter:1.19.3'
+    testImplementation 'org.testcontainers:mysql:1.19.3'
+    testImplementation 'org.testcontainers:redis:1.19.3'
+    testImplementation 'org.testcontainers:kafka:1.19.3'
+
+    // RestAssured (API Tests)
+    testImplementation 'io.rest-assured:rest-assured:5.4.0'
+    testImplementation 'io.rest-assured:json-path:5.4.0'
+    testImplementation 'io.rest-assured:json-schema-validator:5.4.0'
+
+    // Mockito (Unit Tests)
+    testImplementation 'org.mockito:mockito-inline:5.2.0'
+    testImplementation 'org.mockito:mockito-junit-jupiter:5.10.0'
+
+    // Faker (Test Data Generation)
+    testImplementation 'net.datafaker:datafaker:2.1.0'
+
 }
 
 tasks.test {

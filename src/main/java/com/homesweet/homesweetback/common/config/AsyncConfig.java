@@ -61,5 +61,43 @@ public class AsyncConfig {
         executor.initialize();
         return executor;
     }
+
+    /**
+     * 커뮤니티 이벤트 처리용 스레드 풀
+     */
+    @Bean(name = "communityEventExecutor")
+    public Executor communityEventExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(5);
+        executor.setMaxPoolSize(10);
+        executor.setQueueCapacity(100);
+        executor.setThreadNamePrefix("community-event-");
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(30);
+        executor.setRejectedExecutionHandler((r, executor1) -> {
+            log.warn("커뮤니티 이벤트 처리 작업이 거부되었습니다. 큐가 가득 찼습니다.");
+        });
+        executor.initialize();
+        return executor;
+    }
+
+    /**
+     * 이미지 업로드용 스레드 풀
+     */
+    @Bean(name = "imageUploadExecutor")
+    public Executor imageUploadExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(4);
+        executor.setMaxPoolSize(12);
+        executor.setQueueCapacity(200);
+        executor.setThreadNamePrefix("image-upload-");
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(60);
+        executor.setRejectedExecutionHandler((r, executor1) -> {
+            log.warn("이미지 업로드 작업이 거부되었습니다. 큐가 가득 찼습니다.");
+        });
+        executor.initialize();
+        return executor;
+    }
 }
 

@@ -1,0 +1,27 @@
+# Kafka 설정 (EDA 확장용)
+spring:
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer:
+      group-id: homesweet-community
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: "*"
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: all
+      retries: 3
+    listener:
+      ack-mode: manual
+
+# Kafka 토픽 설정
+community:
+  kafka:
+    topics:
+      post-created: community.post.created
+      post-liked: community.post.liked
+      comment-created: community.comment.created
+    enabled: false  # 프로덕션에서 활성화
