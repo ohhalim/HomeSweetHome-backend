@@ -80,4 +80,10 @@ public class CommunityCommentEntity extends BaseEntity {
     public void deleteComment() {
         this.isDeleted = true;
     }
+
+    /**
+     * 댓글 좋아요
+     */
+    public void increaseLikeCount() { this.likeCount++; }
+    public void decreaseLikeCount() { this.likeCount--; }
 }

@@ -1,11 +1,11 @@
 services:
   spring:
-    image: ohhalim/homesweet-commu:2.2
+    image: ohhalim/homesweet-commu:9858
     container_name: homesweet-backend
     env_file:
       - .env
     environment:
-      - SPRING_PROFILES_ACTIVE=prod
+      - SPRING_PROFILES_ACTIVE=prod#- JVM_OPTS=-XX:+UseZGC -XX:+ZGenerational -Xlog:gc*
     network_mode: host
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
@@ -30,8 +30,8 @@ services:
     container_name: mysqld_exporter
     restart: always
     command:
-    - "--mysqld.username=homesweet:homesweet123"
-    - "--mysqld.address=172.31.39.254:3306"
+    - "--mysqld.username=user:password"
+    - "--mysqld.address=10.0.6.32:3306"   
     ports:
       - "9104:9104"
     networks:
