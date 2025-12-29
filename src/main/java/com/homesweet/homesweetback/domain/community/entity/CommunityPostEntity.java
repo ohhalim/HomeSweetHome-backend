@@ -89,21 +89,4 @@ public class CommunityPostEntity extends BaseEntity {
     public void deletePost() {
         this.isDeleted = true;
     }
-
-    /**
-     * 게시글 조회수 카운트
-     */
-    public void increaseViewCount() { this.viewCount++; }
-
-    /**
-     * 게시글 좋아요 카운트
-     */
-    public void increaseLikeCount() { this.likeCount++; }
-    public void decreaseLikeCount() { this.likeCount--; }
-
-    /**
-     * 게시글 댓글 카운트
-     */
-    public void increaseCommentCount() { this.commentCount++; }
-    public void decreaseCommentCount() { this.commentCount--; }
 }

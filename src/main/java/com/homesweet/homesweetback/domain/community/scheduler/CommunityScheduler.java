@@ -19,6 +19,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+/**
+ * 커뮤니티 데이터 동기화 스케줄러
+ * Redis → DB 배치 동기화
+ *
+ * 스케줄러 설정은 application.yml의 community.scheduler 섹션에서 관리
+ */
 @Component
 @Slf4j
 @RequiredArgsConstructor
@@ -33,37 +39,31 @@ public class CommunityScheduler {
     private final CommunityCountService communityCountService;
 
     /**
-     * 인기 게시글 캐시 워밍업 - 서버 시작 시 및 1시간마다 실행
-     * 최근 게시글 상위 100개의 좋아요/조회수 데이터를 Redis에 미리 로딩
+     * 인기 게시글 캐시 워밍업 - 서버 시작 시 및 주기적 실행
      */
-    @Scheduled(initialDelay = 5000, fixedDelay = 3600000)  // 5초 후 시작, 1시간마다
+    @Scheduled(initialDelay = 5000, fixedDelayString = "${community.scheduler.warmup-delay:3600000}")
     public void warmupPopularPostsCache() {
         log.info("Starting cache warmup for popular posts...");
 
         try {
-            // 최근 게시글 100개 조회 (가장 많이 조회될 가능성 높음)
             var recentPosts = communityPostRepository.findByIsDeletedFalse(
-                    PageRequest.of(0, 100, Sort.by(Sort.Direction.DESC, "postId"))
-            );
+                    PageRequest.of(0, 100, Sort.by(Sort.Direction.DESC, "postId")));
 
             int warmupCount = 0;
             for (var post : recentPosts.getContent()) {
                 Long postId = post.getPostId();
 
-                // 좋아요 데이터 워밍업 (Cache Miss 방지)
                 if (!redisService.hasPostLikeKey(postId)) {
                     List<Long> userIds = postLikeRepository.findUserIdsByPostId(postId);
                     redisService.setPostLikes(postId, userIds);
                     warmupCount++;
                 }
 
-                // 조회수/댓글수/좋아요수 워밍업
-                communityCountService.getViewCountFromCache(postId);
-                communityCountService.getLikeCountFromCache(postId);
-                communityCountService.getCommentCountFromCache(postId);
+                // 카운터 워밍업
+                communityCountService.getPostCounts(postId);
             }
 
-            log.info("Cache warmup completed - posts processed: {}, likes warmed up: {}",
+            log.info("Cache warmup completed - posts: {}, likes warmed: {}",
                     recentPosts.getContent().size(), warmupCount);
 
         } catch (Exception e) {
@@ -71,109 +71,57 @@ public class CommunityScheduler {
         }
     }
 
-    @Scheduled(initialDelay = 100000, fixedDelay = 110000)
-    public void updateCountData() {
-        // 1. Redis에서 조회수 데이터 수집
+    /**
+     * 조회수 동기화 (Redis → DB)
+     */
+    @Scheduled(initialDelayString = "${community.scheduler.view-sync-delay:100000}", fixedDelayString = "${community.scheduler.view-sync-delay:110000}")
+    public void syncViewCounts() {
         Map<Long, Integer> viewCounts = redisService.scanAndCollectViewCounts();
 
         if (viewCounts.isEmpty()) {
             return;
         }
 
-        // 2. DB 업데이트 (트랜잭션)
-        transactionTemplate.executeWithoutResult(status -> {
-            viewCounts.forEach((postId, viewCount) -> {
-                try {
-                    int affected = communityPostRepository.updateViewCount(postId, viewCount);
+        syncCountsToDb(viewCounts, "view",
+                (postId, count) -> communityPostRepository.updateViewCount(postId, count),
+                redisService::deletePostViewKey);
 
-                    if (affected > 0) {
-                        // DB 동기화 성공 시 Redis 값 유지 (Cache-Aside 패턴)
-                        log.debug("View count synced to DB - postId: {}, viewCount: {}", postId, viewCount);
-                    } else {
-                        // 게시글이 삭제된 경우 Redis 키 정리
-                        redisService.deletePostViewKey(postId);
-                    }
-                } catch (Exception e) {
-                    log.error("Failed to update view count for postId: {}", postId, e);
-                }
-            });
-        });
-
-        log.info("View count sync completed - total processed: {}", viewCounts.size());
+        log.info("View count sync completed - processed: {}", viewCounts.size());
     }
 
-    // 댓글 수정
-    @Scheduled(initialDelay = 200000, fixedDelay = 210000)
-    public void updateCommentData() {
-        // 1. Redis에서 댓글수 데이터 수집
+    /**
+     * 댓글수 동기화 (Redis → DB)
+     */
+    @Scheduled(initialDelayString = "${community.scheduler.comment-sync-delay:200000}", fixedDelayString = "${community.scheduler.comment-sync-delay:210000}")
+    public void syncCommentCounts() {
         Map<Long, Integer> commentCounts = redisService.scanAndCollectCommentCounts();
 
         if (commentCounts.isEmpty()) {
             return;
         }
 
-        // 2. DB 업데이트 (트랜잭션)
-        transactionTemplate.executeWithoutResult(status -> {
-            commentCounts.forEach((postId, commentCount) -> {
-                try {
-                    int affected = communityPostRepository.setCommentCount(postId, commentCount);
+        syncCountsToDb(commentCounts, "comment",
+                (postId, count) -> communityPostRepository.setCommentCount(postId, count),
+                redisService::deletePostCommentCountKey);
 
-                    if (affected > 0) {
-                        // DB 동기화 성공 시 Redis 값 유지 (Cache-Aside 패턴)
-                        log.debug("Comment count synced to DB - postId: {}, commentCount: {}", postId, commentCount);
-                    } else {
-                        // 게시글이 삭제된 경우 Redis 키 정리
-                        redisService.deletePostCommentCountKey(postId);
-                    }
-                } catch (Exception e) {
-                    log.error("Failed to update comment count for postId: {}", postId, e);
-                }
-            });
-        });
-
-        log.info("Comment count sync completed - total processed: {}", commentCounts.size());
+        log.info("Comment count sync completed - processed: {}", commentCounts.size());
     }
 
     /**
-     * 게시글 좋아요 Event Queue 배치 동기화 (관계 + 개수)
-     * 5분마다 실행
+     * 게시글 좋아요 이벤트 동기화 (Redis Queue → DB)
      */
-    @Scheduled(fixedDelay = 300000)  // 5분
+    @Scheduled(fixedDelayString = "${community.scheduler.like-sync-delay:300000}")
     public void syncPostLikeEvents() {
-        // 1. Redis Queue에서 이벤트 가져오기
         List<LikeEvent> events = redisService.pollPostLikeEvents(1000);
 
         if (events.isEmpty()) {
             return;
         }
 
-        // 2. 마지막 상태만 추출 (중복 제거)
-        Map<String, LikeEvent> deduplicated = events.stream()
-                .collect(Collectors.toMap(
-                        e -> e.targetId() + ":" + e.userId(),
-                        e -> e,
-                        (old, new_) -> new_  // 마지막 이벤트만 유지
-                ));
+        int[] counts = syncLikeEvents(events,
+                postLikeRepository::insertPostLike,
+                postLikeRepository::deleteByPostIdAndUserId);
 
-        // 3. DB 업데이트 (트랜잭션)
-        int[] counts = {0, 0};  // [addCount, removeCount]
-        transactionTemplate.executeWithoutResult(status -> {
-            deduplicated.values().forEach(event -> {
-                try {
-                    if (event.isAdd()) {
-                        postLikeRepository.insertPostLike(event.targetId(), event.userId());
-                        counts[0]++;
-                    } else {
-                        postLikeRepository.deleteByPostIdAndUserId(event.targetId(), event.userId());
-                        counts[1]++;
-                    }
-                } catch (Exception e) {
-                    log.error("Failed to sync post like event: {}", event, e);
-                }
-            });
-        });
-
-        // 4. 처리된 이벤트 제거
         redisService.trimPostLikeEvents(events.size());
 
         log.info("Post like events synced - total: {}, added: {}, removed: {}",
@@ -181,80 +129,38 @@ public class CommunityScheduler {
     }
 
     /**
-     * 게시글 좋아요 개수 배치 동기화 (Redis → DB)
-     * 5분마다 실행 (좋아요 이벤트 동기화 직후)
+     * 게시글 좋아요 개수 동기화 (Redis → DB)
      */
-    @Scheduled(fixedDelay = 300000, initialDelay = 310000)  // 5분, 초기 지연 5분 10초
-    public void syncPostLikeCount() {
-        // 1. Redis에서 좋아요수 데이터 수집
+    @Scheduled(fixedDelayString = "${community.scheduler.like-sync-delay:300000}", initialDelayString = "${community.scheduler.like-sync-delay:310000}")
+    public void syncPostLikeCounts() {
         Map<Long, Integer> likeCounts = redisService.scanAndCollectPostLikeCounts();
 
         if (likeCounts.isEmpty()) {
             return;
         }
 
-        // 2. DB 업데이트 (트랜잭션)
-        transactionTemplate.executeWithoutResult(status -> {
-            likeCounts.forEach((postId, likeCount) -> {
-                try {
-                    int affected = communityPostRepository.setLikeCount(postId, likeCount);
+        syncCountsToDb(likeCounts, "post like",
+                (postId, count) -> communityPostRepository.setLikeCount(postId, count),
+                redisService::deletePostLikeKeys);
 
-                    if (affected > 0) {
-                        // DB 동기화 성공 시 Redis 값 유지 (Cache-Aside 패턴)
-                        log.debug("Post like count synced to DB - postId: {}, likeCount: {}", postId, likeCount);
-                    } else {
-                        // 게시글이 삭제된 경우 Redis 키 정리
-                        redisService.deletePostLikeKeys(postId);
-                    }
-                } catch (Exception e) {
-                    log.error("Failed to update like count for postId: {}", postId, e);
-                }
-            });
-        });
-
-        log.info("Post like count sync completed - total processed: {}", likeCounts.size());
+        log.info("Post like count sync completed - processed: {}", likeCounts.size());
     }
 
     /**
-     * 댓글 좋아요 Event Queue 배치 동기화 (관계)
-     * 5분마다 실행
+     * 댓글 좋아요 이벤트 동기화 (Redis Queue → DB)
      */
-    @Scheduled(fixedDelay = 300000)  // 5분
+    @Scheduled(fixedDelayString = "${community.scheduler.like-sync-delay:300000}")
     public void syncCommentLikeEvents() {
-        // 1. Redis Queue에서 이벤트 가져오기
         List<LikeEvent> events = redisService.pollCommentLikeEvents(1000);
 
         if (events.isEmpty()) {
             return;
         }
 
-        // 2. 마지막 상태만 추출 (중복 제거)
-        Map<String, LikeEvent> deduplicated = events.stream()
-                .collect(Collectors.toMap(
-                        e -> e.targetId() + ":" + e.userId(),
-                        e -> e,
-                        (old, new_) -> new_
-                ));
+        int[] counts = syncLikeEvents(events,
+                commentLikeRepository::insertCommentLike,
+                commentLikeRepository::deleteByCommentIdAndUserId);
 
-        // 3. DB 업데이트 (트랜잭션)
-        int[] counts = {0, 0};  // [addCount, removeCount]
-        transactionTemplate.executeWithoutResult(status -> {
-            deduplicated.values().forEach(event -> {
-                try {
-                    if (event.isAdd()) {
-                        commentLikeRepository.insertCommentLike(event.targetId(), event.userId());
-                        counts[0]++;
-                    } else {
-                        commentLikeRepository.deleteByCommentIdAndUserId(event.targetId(), event.userId());
-                        counts[1]++;
-                    }
-                } catch (Exception e) {
-                    log.error("Failed to sync comment like event: {}", event, e);
-                }
-            });
-        });
-
-        // 4. 처리된 이벤트 제거
         redisService.trimCommentLikeEvents(events.size());
 
         log.info("Comment like events synced - total: {}, added: {}, removed: {}",
@@ -262,37 +168,98 @@ public class CommunityScheduler {
     }
 
     /**
-     * 댓글 좋아요 개수 배치 동기화 (Redis → DB)
-     * 5분마다 실행 (댓글 좋아요 이벤트 동기화 직후)
+     * 댓글 좋아요 개수 동기화 (Redis → DB)
      */
-    @Scheduled(fixedDelay = 300000, initialDelay = 320000)  // 5분, 초기 지연 5분 20초
-    public void syncCommentLikeCount() {
-        // 1. Redis에서 댓글 좋아요수 데이터 수집
+    @Scheduled(fixedDelayString = "${community.scheduler.like-sync-delay:300000}", initialDelayString = "${community.scheduler.like-sync-delay:320000}")
+    public void syncCommentLikeCounts() {
         Map<Long, Integer> likeCounts = redisService.scanAndCollectCommentLikeCounts();
 
         if (likeCounts.isEmpty()) {
             return;
         }
 
-        // 2. DB 업데이트 (트랜잭션)
         transactionTemplate.executeWithoutResult(status -> {
             likeCounts.forEach((commentId, likeCount) -> {
                 try {
                     int affected = commentRepository.setLikeCount(commentId, likeCount);
-
-                    if (affected > 0) {
-                        // DB 동기화 성공 시 Redis 값 유지 (Cache-Aside 패턴)
-                        log.debug("Comment like count synced to DB - commentId: {}, likeCount: {}", commentId, likeCount);
-                    } else {
-                        // 댓글이 삭제된 경우 Redis 키 정리
+                    if (affected == 0) {
                         redisService.deleteCommentLikeKeys(commentId);
                     }
                 } catch (Exception e) {
-                    log.error("Failed to update comment like count for commentId: {}", commentId, e);
+                    log.error("Failed to sync comment like count: {}", commentId, e);
                 }
             });
         });
 
-        log.info("Comment like count sync completed - total processed: {}", likeCounts.size());
+        log.info("Comment like count sync completed - processed: {}", likeCounts.size());
+    }
+
+    // ============================================================
+    // Private Helper Methods
+    // ============================================================
+
+    private void syncCountsToDb(Map<Long, Integer> counts, String type,
+            CountUpdater updater, KeyDeleter deleter) {
+        transactionTemplate.executeWithoutResult(status -> {
+            counts.forEach((id, count) -> {
+                try {
+                    int affected = updater.update(id, count);
+                    if (affected > 0) {
+                        log.debug("{} count synced - id: {}, count: {}", type, id, count);
+                    } else {
+                        deleter.delete(id);
+                    }
+                } catch (Exception e) {
+                    log.error("Failed to sync {} count for id: {}", type, id, e);
+                }
+            });
+        });
+    }
+
+    private int[] syncLikeEvents(List<LikeEvent> events,
+            LikeInserter inserter, LikeDeleter deleter) {
+        Map<String, LikeEvent> deduplicated = events.stream()
+                .collect(Collectors.toMap(
+                        e -> e.targetId() + ":" + e.userId(),
+                        e -> e,
+                        (old, newer) -> newer));
+
+        int[] counts = { 0, 0 };
+        transactionTemplate.executeWithoutResult(status -> {
+            deduplicated.values().forEach(event -> {
+                try {
+                    if (event.isAdd()) {
+                        inserter.insert(event.targetId(), event.userId());
+                        counts[0]++;
+                    } else {
+                        deleter.delete(event.targetId(), event.userId());
+                        counts[1]++;
+                    }
+                } catch (Exception e) {
+                    log.error("Failed to sync like event: {}", event, e);
+                }
+            });
+        });
+        return counts;
+    }
+
+    @FunctionalInterface
+    private interface CountUpdater {
+        int update(Long id, Integer count);
+    }
+
+    @FunctionalInterface
+    private interface KeyDeleter {
+        void delete(Long id);
+    }
+
+    @FunctionalInterface
+    private interface LikeInserter {
+        void insert(Long targetId, Long userId);
+    }
+
+    @FunctionalInterface
+    private interface LikeDeleter {
+        void delete(Long targetId, Long userId);
     }
 }

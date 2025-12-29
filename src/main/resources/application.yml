@@ -79,3 +79,17 @@ retry:
       # (옵션) 400 Bad Request 같은 건 재시도해도 소용없으니 제외
       ignoreExceptions:
         - org.springframework.web.client.HttpClientErrorException
+
+# Community 도메인 설정
+community:
+  cache:
+    post-ttl: 1h        # 게시글 단건 캐시 TTL
+    list-ttl: 1m        # 게시글 목록 캐시 TTL
+    comments-ttl: 30m   # 댓글 목록 캐시 TTL
+  scheduler:
+    view-sync-delay: 110000     # 조회수 동기화 주기 (ms)
+    comment-sync-delay: 210000  # 댓글수 동기화 주기 (ms)
+    like-sync-delay: 300000     # 좋아요 동기화 주기 (ms)
+    warmup-delay: 3600000       # 캐시 워밍업 주기 (ms)
+  redis:
+    ttl: 7d             # Redis 카운터 TTL
