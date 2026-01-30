@@ -7,6 +7,7 @@ import com.homesweet.homesweetback.domain.community.exception.CommunityException
 import com.homesweet.homesweetback.domain.community.repository.CommunityCommentLikeRepository;
 import com.homesweet.homesweetback.domain.community.repository.CommunityPostLikeRepository;
 import com.homesweet.homesweetback.domain.community.repository.CommunityPostRepository;
+import com.homesweet.homesweetback.domain.subscription.service.SubscriptionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -46,6 +47,8 @@ public class CommunityCountService {
     private final CommunityCommentLikeRepository commentLikeRepository;
     // Redis 접근용 (실제 카운터 저장/조회)
     private final CommunityRedisService redisService;
+    // 구독 확인용 (프리미엄 커뮤니티)
+    private final SubscriptionService subscriptionService;
 
     // ============================================================
     // [조회수 관련]
@@ -148,6 +151,9 @@ public class CommunityCountService {
      */
     @Transactional
     public void togglePostLike(Long postId, Long userId) {
+        // 구독 확인 (비구독자 차단)
+        subscriptionService.validateSubscription(userId);
+
         // Redis에서 좋아요 토글 시도
         Long result = redisService.togglePostLike(postId, userId);
 
@@ -202,6 +208,9 @@ public class CommunityCountService {
      */
     @Transactional
     public void toggleCommentLike(Long commentId, Long userId) {
+        // 구독 확인 (비구독자 차단)
+        subscriptionService.validateSubscription(userId);
+
         Long result = redisService.toggleCommentLike(commentId, userId);
 
         if (result == -1) {

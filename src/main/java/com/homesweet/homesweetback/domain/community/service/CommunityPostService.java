@@ -14,6 +14,7 @@ import com.homesweet.homesweetback.domain.community.entity.CommunityPostEntity;
 import com.homesweet.homesweetback.domain.community.exception.CommunityException;
 import com.homesweet.homesweetback.domain.community.repository.CommunityImageRepository;
 import com.homesweet.homesweetback.domain.community.repository.CommunityPostRepository;
+import com.homesweet.homesweetback.domain.subscription.service.SubscriptionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -64,6 +65,8 @@ public class CommunityPostService {
     private final CacheHelper cacheHelper;
     // 캐시 TTL(유효시간) 등 설정값
     private final CommunityConfig config;
+    // 구독 확인용 (프리미엄 커뮤니티)
+    private final SubscriptionService subscriptionService;
 
     // 캐시 키 접두어 (이걸로 게시글 캐시인지 구분)
     private static final String POST_CACHE_PREFIX = "communityPost::";
@@ -86,6 +89,9 @@ public class CommunityPostService {
      */
     @Transactional // 쓰기 작업이라 readOnly 해제
     public CommunityPostResponse createPost(List<MultipartFile> images, CommunityPostRequest request, Long userId) {
+        // 0. 구독 확인 (비구독자 차단)
+        subscriptionService.validateSubscription(userId);
+
         // 1. 작성자 정보 조회 (없으면 예외 발생)
         User author = userRepository.findById(userId)
                 .orElseThrow(() -> new CommunityException(ErrorCode.USER_NOT_FOUND));
@@ -212,7 +218,7 @@ public class CommunityPostService {
      * [게시글 목록 조회 - 페이지네이션 + 캐싱]
      *
      * [동작 흐름]
-     * 1. 캐시에서 해당 페이지 데이터 찾기
+         * 1. 캐시에서 해당 페이지 데이터 찾기
      * 2. 있으면 -> 최신 카운터와 합쳐서 반환
      * 3. 없으면 -> DB에서 조회 -> 캐시에 저장 -> 반환
      *

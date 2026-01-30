@@ -8,6 +8,7 @@ import com.homesweet.homesweetback.domain.community.dto.CommunityPostResponse;
 import com.homesweet.homesweetback.domain.community.service.CommunityCommentService;
 import com.homesweet.homesweetback.domain.community.service.CommunityCountService;
 import com.homesweet.homesweetback.domain.community.service.CommunityPostService;
+import com.homesweet.homesweetback.domain.subscription.service.SubscriptionService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j; // 로그 확인용
@@ -29,9 +30,10 @@ import java.util.List;
 @RequiredArgsConstructor
 public class CommunityController {
 
-    private final CommunityPostService communityPostService; // 변수명 소문자로 수정 (Java 컨벤션)
+    private final CommunityPostService communityPostService;
     private final CommunityCommentService communityCommentService;
     private final CommunityCountService communityCountService;
+    private final SubscriptionService subscriptionService;
 
     // ==========================================
     // 💡 핵심: 안전하게 User ID를 가져오는 헬퍼 메서드
@@ -69,10 +71,14 @@ public class CommunityController {
     }
 
     /**
-     * 게시글 단건 조회 API (Authentication 불필요)
+     * 게시글 단건 조회 API (프리미엄 구독자 전용)
      */
     @GetMapping("/posts/{postId}")
-    public ResponseEntity<CommunityPostResponse> getPost(@PathVariable Long postId) {
+    public ResponseEntity<CommunityPostResponse> getPost(
+            @PathVariable Long postId,
+            Authentication authentication) {
+        Long userId = getUserId(authentication);
+        subscriptionService.validateSubscription(userId);
         CommunityPostResponse response = communityPostService.getPost(postId);
         return ResponseEntity.ok(response);
     }
@@ -117,10 +123,14 @@ public class CommunityController {
     }
 
     /**
-     * 해당 게시글 모든 댓글 조회 (Authentication 불필요)
+     * 해당 게시글 모든 댓글 조회 (프리미엄 구독자 전용)
      */
     @GetMapping("/posts/{postId}/comments")
-    public ResponseEntity<List<CommunityCommentResponse>> getComments(@PathVariable Long postId) {
+    public ResponseEntity<List<CommunityCommentResponse>> getComments(
+            @PathVariable Long postId,
+            Authentication authentication) {
+        Long userId = getUserId(authentication);
+        subscriptionService.validateSubscription(userId);
         List<CommunityCommentResponse> responses = communityCommentService.getCommentsByPostId(postId);
         return ResponseEntity.ok(responses);
     }
@@ -220,13 +230,16 @@ public class CommunityController {
         return ResponseEntity.ok(isLiked);
     }
 
-    // 페이지네이션
+    // 페이지네이션 (프리미엄 구독자 전용)
     @GetMapping("/posts")
     public ResponseEntity<Page<CommunityPostResponse>> getPosts(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size,
             @RequestParam(defaultValue = "createdAt") String sort,
-            @RequestParam(defaultValue = "DESC") String direction) {
+            @RequestParam(defaultValue = "DESC") String direction,
+            Authentication authentication) {
+        Long userId = getUserId(authentication);
+        subscriptionService.validateSubscription(userId);
         Sort.Direction sortDirection = Sort.Direction.valueOf(direction.toUpperCase());
         Pageable pageable = PageRequest.of(page, size, sortDirection, sort);
         Page<CommunityPostResponse> posts = communityPostService.getPosts(pageable);
