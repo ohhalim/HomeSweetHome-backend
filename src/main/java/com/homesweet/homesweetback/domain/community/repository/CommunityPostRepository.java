@@ -14,11 +14,11 @@ import java.util.Optional;
 
 public interface CommunityPostRepository extends JpaRepository<CommunityPostEntity, Long> {
     // 특정 게시글 조회 - N+1 문제 해결
-    @EntityGraph(attributePaths = {"author", "author.grade"})
+    @EntityGraph(attributePaths = {"author"})
     Optional<CommunityPostEntity> findByPostIdAndIsDeletedFalse(Long postId);
 
     // 페이지네이션 쿼리 메서드 / N+1문제 해결위해 EntityGraph 추가
-    @EntityGraph(attributePaths = {"author", "author.grade"})
+    @EntityGraph(attributePaths = {"author"})
     Page<CommunityPostEntity> findByIsDeletedFalse(Pageable pageable);
 
     // 전체 게시글 수 조회 (캐싱용)

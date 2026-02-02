@@ -18,7 +18,7 @@ import java.util.List;
 public interface CommunityCommentRepository extends JpaRepository<CommunityCommentEntity, Long> {
 
     // 특정 게시글의 댓글 조회 - N+1 문제 해결
-    @EntityGraph(attributePaths = {"author", "author.grade"})
+    @EntityGraph(attributePaths = {"author"})
     List<CommunityCommentEntity> findByPost_PostIdAndIsDeletedFalse(Long postId);
 
     @Modifying(clearAutomatically = true, flushAutomatically = true)

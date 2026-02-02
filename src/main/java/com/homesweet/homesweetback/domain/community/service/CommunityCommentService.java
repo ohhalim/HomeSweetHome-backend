@@ -13,7 +13,6 @@ import com.homesweet.homesweetback.domain.community.entity.CommunityPostEntity;
 import com.homesweet.homesweetback.domain.community.exception.CommunityException;
 import com.homesweet.homesweetback.domain.community.repository.CommunityCommentRepository;
 import com.homesweet.homesweetback.domain.community.repository.CommunityPostRepository;
-import com.homesweet.homesweetback.domain.subscription.service.SubscriptionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -55,8 +54,6 @@ public class CommunityCommentService {
         private final CacheHelper cacheHelper;
         // 설정값 (캐시 TTL 등)
         private final CommunityConfig config;
-        // 구독 확인용 (프리미엄 커뮤니티)
-        private final SubscriptionService subscriptionService;
 
         // 댓글 캐시 키 접두어: "comments::post::123" (게시글 123의 댓글들)
         private static final String COMMENTS_CACHE_PREFIX = "comments::post::";
@@ -77,9 +74,6 @@ public class CommunityCommentService {
          */
         @Transactional
         public CommunityCommentResponse createComment(Long postId, CommunityCommentRequest request, Long userId) {
-                // 0. 구독 확인 (비구독자 차단)
-                subscriptionService.validateSubscription(userId);
-
                 // 1. 작성자 정보 가져오기
                 User author = userRepository.findById(userId)
                                 .orElseThrow(() -> new CommunityException(ErrorCode.USER_NOT_FOUND));
