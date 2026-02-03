@@ -36,7 +36,7 @@ public class Order {
     private String orderNumber;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "status", nullable = false, length = 20)
+    @Column(name = "order_status", nullable = false, length = 20)
     private OrderStatus status;
 
     @Column(name = "total_amount", nullable = false)
@@ -47,7 +47,7 @@ public class Order {
     private List<OrderItem> orderItems = new ArrayList<>();
 
     @CreatedDate
-    @Column(name = "created_at", nullable = false, updatable = false)
+    @Column(name = "ordered_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
     @LastModifiedDate

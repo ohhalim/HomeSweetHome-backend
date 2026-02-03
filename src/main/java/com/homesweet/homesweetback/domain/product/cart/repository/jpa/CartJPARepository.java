@@ -36,4 +36,15 @@ public interface CartJPARepository extends JpaRepository<CartEntity, Long>, Cust
     @Modifying(clearAutomatically = true)
     @Query(value = "DELETE FROM carts WHERE user_id = :userId AND sku_id IN (:skuIds)", nativeQuery = true)
     void deleteCartItemNative(@Param("userId") Long userId, @Param("skuIds") List<Long> skuIds); // 장바구니에서 구매가 완료된 SKU 목록 삭제 - 안채호
+
+    /**
+     * ID 목록으로 장바구니 아이템 조회 (SKU, Product fetch join)
+     * 주문 생성 시 사용
+     */
+    @Query("SELECT c FROM CartEntity c " +
+           "JOIN FETCH c.sku s " +
+           "JOIN FETCH s.product " +
+           "JOIN FETCH c.user " +
+           "WHERE c.id IN :ids")
+    List<CartEntity> findAllByIdInWithSkuAndProduct(@Param("ids") List<Long> ids);
 }

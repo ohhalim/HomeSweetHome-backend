@@ -39,7 +39,7 @@ public class Payment {
     private String tossOrderId;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 20)
+    @Column(name = "payment_status", nullable = false, length = 20)
     private PaymentStatus status;
 
     @Column(nullable = false)

@@ -9,6 +9,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
+import java.lang.reflect.Field;
 import java.util.List;
 import java.util.Optional;
 
@@ -30,7 +31,7 @@ import com.homesweet.homesweetback.domain.order.entity.Order;
 import com.homesweet.homesweetback.domain.order.entity.OrderStatus;
 import com.homesweet.homesweetback.domain.order.repository.OrderRepository;
 import com.homesweet.homesweetback.domain.product.cart.repository.jpa.CartJPARepository;
-import com.homesweet.homesweetback.domain.product.cart.repository.jpa.entity.CartEntity;
+import com.homesweet.homesweetback.domain.product.product.command.repository.jpa.SkuJPARepository;
 import com.homesweet.homesweetback.domain.product.product.command.repository.jpa.entity.ProductEntity;
 import com.homesweet.homesweetback.domain.product.product.command.repository.jpa.entity.SkuEntity;
 
@@ -57,6 +58,9 @@ class OrderServiceTest {
 
     @Mock
     private CartJPARepository cartJPARepository;
+
+    @Mock
+    private SkuJPARepository skuJPARepository;
 
     @Mock
     private UserRepository userRepository;
@@ -86,23 +90,39 @@ class OrderServiceTest {
                 .build();
     }
 
-    private CartEntity createTestCart(Long cartId, User user, Long price, Long quantity) {
-        // Mock ProductEntity
+    private SkuEntity createTestSku(Long skuId, Long price) {
         ProductEntity product = mock(ProductEntity.class);
-        given(product.getName()).willReturn("테스트상품" + cartId);
-        
-        // Mock SkuEntity
+        given(product.getName()).willReturn("테스트상품" + skuId);
+
         SkuEntity sku = mock(SkuEntity.class);
-        given(sku.getId()).willReturn(cartId);
+        given(sku.getId()).willReturn(skuId);
         given(sku.getFinalPrice()).willReturn(price);
         given(sku.getProduct()).willReturn(product);
-        
-        return CartEntity.builder()
-                .id(cartId)
-                .user(user)
-                .sku(sku)
-                .quantity(quantity.intValue())
-                .build();
+        return sku;
+    }
+
+    private CreateOrderRequest createRequest(List<CreateOrderRequest.OrderItemRequest> items) {
+        CreateOrderRequest request = new CreateOrderRequest();
+        setField(request, "orderItems", items);
+        return request;
+    }
+
+    private CreateOrderRequest.OrderItemRequest createOrderItem(Long cartId, Long skuId, Integer quantity) {
+        CreateOrderRequest.OrderItemRequest item = new CreateOrderRequest.OrderItemRequest();
+        setField(item, "cartId", cartId);
+        setField(item, "skuId", skuId);
+        setField(item, "quantity", quantity);
+        return item;
+    }
+
+    private static void setField(Object target, String fieldName, Object value) {
+        try {
+            Field field = target.getClass().getDeclaredField(fieldName);
+            field.setAccessible(true);
+            field.set(target, value);
+        } catch (NoSuchFieldException | IllegalAccessException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     // ===== 주문 생성 테스트 =====
@@ -115,25 +135,21 @@ class OrderServiceTest {
         @DisplayName("주문 생성 성공")
         void createOrder_Success() {
             // given
-            // 주문할 장바구니 목록 
-            Long userId = 1L; 
-            // 주문할 장바구니 목록 
-            List<Long> cartIds = List.of(1L, 2L); 
-            //api DTO 생성
-            CreateOrderRequest request = new CreateOrderRequest(cartIds); 
+            Long userId = 1L;
+            CreateOrderRequest request = createRequest(List.of(
+                    createOrderItem(1L, 1L, 2),
+                    createOrderItem(2L, 2L, 1)
+            ));
 
             //테스트용 가짜 user 객체 생성
             User user = createTestUser(userId);
 
-            // cart1: 가격 10000원 수량 2개
-            // cart2: ..
-            CartEntity cart1 = createTestCart(1L, user, 10000L, 2L);
-            CartEntity cart2 = createTestCart(2L, user, 15000L, 1L);
+            SkuEntity sku1 = createTestSku(1L, 10000L);
+            SkuEntity sku2 = createTestSku(2L, 15000L);
 
             // userRepository.findById(1L) 호출되면 ->user 반환해라
             given(userRepository.findById(userId)).willReturn(Optional.of(user));
-            // cartJPARepository.findAllById([1,2]) 호출되면 → cart1, cart2 반환해라
-            given(cartJPARepository.findAllById(cartIds)).willReturn(List.of(cart1, cart2));
+            given(skuJPARepository.findAllByIdWithProduct(List.of(1L, 2L))).willReturn(List.of(sku1, sku2));
             // orderRepository.save() 호출되면 -> 전달받은 order 그대로 반환
             given(orderRepository.save(any(Order.class))).willAnswer(invocation -> {
                 return invocation.getArgument(0);
@@ -146,26 +162,24 @@ class OrderServiceTest {
             // 응답이 null이 아닌지 확인
             assertThat(response).isNotNull();
             assertThat(response.getTotalAmount()).isEqualTo(35000L);
-            verify(orderRepository, times(2)).save(any(Order.class));
+            verify(orderRepository, times(1)).save(any(Order.class));
 
         }
 
         @Test
-        @DisplayName("주문 생성 실패 - 장바구니 없음")
+        @DisplayName("주문 생성 실패 - 상품 없음")
         void createOrder_Fail_EmptyCart() {
             // given
             Long userId = 1L;
-            List<Long> emptyCartIds = List.of();  // 빈 리스트
-            CreateOrderRequest request = new CreateOrderRequest(emptyCartIds);
+            CreateOrderRequest request = createRequest(List.of());
             User user = createTestUser(userId);
 
             given(userRepository.findById(userId)).willReturn(Optional.of(user));
-            given(cartJPARepository.findAllById(emptyCartIds)).willReturn(List.of());
 
             // when & then
             assertThatThrownBy(() -> orderService.createFromCart(userId, request))
                     .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("장바구니에서 선택한 상품을 찾을 수 없습니다");
+                    .hasMessageContaining("주문할 상품이 없습니다");
         }
     }
 
