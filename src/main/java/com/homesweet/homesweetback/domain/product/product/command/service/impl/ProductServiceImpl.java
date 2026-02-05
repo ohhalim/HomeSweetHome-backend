@@ -105,6 +105,14 @@ public class ProductServiceImpl implements ProductService {
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public ProductPreviewPageResponse getProductPreviews(Long categoryId, Long cursorId, int limit, String sortType) {
+        List<ProductPreviewResponse> previews = productRepository.findProductPreviews(categoryId, cursorId, limit, sortType);
+        return ProductPreviewPageResponse.of(previews, limit);
+    }
+
+
+    @Override
     public void updateBasicInfo(Long sellerId, Long productId, ProductBasicInfoUpdateRequest request) {
         Product product = productRepository.findByIdAndSellerId(productId, sellerId)
                 .orElseThrow(() -> new ProductException(ErrorCode.PRODUCT_NOT_FOUND_ERROR));

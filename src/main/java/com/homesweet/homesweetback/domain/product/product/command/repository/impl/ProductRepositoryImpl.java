@@ -3,6 +3,7 @@ package com.homesweet.homesweetback.domain.product.product.command.repository.im
 import com.homesweet.homesweetback.common.exception.ErrorCode;
 import com.homesweet.homesweetback.domain.product.product.command.controller.response.ProductDetailResponse;
 import com.homesweet.homesweetback.domain.product.product.command.controller.response.ProductManageResponse;
+import com.homesweet.homesweetback.domain.product.product.command.controller.response.ProductPreviewResponse;
 import com.homesweet.homesweetback.domain.product.product.command.controller.response.SkuStockResponse;
 import com.homesweet.homesweetback.domain.product.product.command.domain.Product;
 import com.homesweet.homesweetback.domain.product.product.command.domain.ProductStatus;
@@ -11,7 +12,11 @@ import com.homesweet.homesweetback.domain.product.product.command.repository.Pro
 import com.homesweet.homesweetback.domain.product.product.command.repository.jpa.ProductJPARepository;
 import com.homesweet.homesweetback.domain.product.product.command.repository.jpa.entity.ProductDetailImageEntity;
 import com.homesweet.homesweetback.domain.product.product.command.repository.jpa.entity.ProductEntity;
+import com.homesweet.homesweetback.domain.product.product.command.repository.jpa.entity.QProductEntity;
 import com.homesweet.homesweetback.domain.product.product.command.repository.mapper.ProductMapper;
+import com.querydsl.core.types.OrderSpecifier;
+import com.querydsl.core.types.dsl.BooleanExpression;
+import com.querydsl.jpa.impl.JPAQueryFactory;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 
@@ -30,6 +35,7 @@ public class ProductRepositoryImpl implements ProductRepository {
 
     private final ProductJPARepository productRepository;
     private final ProductMapper mapper;
+    private final JPAQueryFactory queryFactory;
 
     @Override
     public Product save(Product product) {
@@ -71,6 +77,38 @@ public class ProductRepositoryImpl implements ProductRepository {
     @Override
     public List<ProductManageResponse> findProductsForSeller(Long sellerId, String startDate, String endDate) {
         return productRepository.findProductsForSeller(sellerId, startDate, endDate);
+    }
+
+    @Override
+    public List<ProductPreviewResponse> findProductPreviews(Long categoryId, Long cursorId, int limit, String sortType) {
+        QProductEntity product = QProductEntity.productEntity;
+
+        BooleanExpression condition = product.status.eq(ProductStatus.ON_SALE);
+
+        if (categoryId != null) {
+            condition = condition.and(product.category.id.eq(categoryId));
+        }
+
+        if (cursorId != null) {
+            condition = condition.and(product.id.lt(cursorId));
+        }
+
+        OrderSpecifier<?> orderBy = switch (sortType != null ? sortType : "LATEST") {
+            case "PRICE_LOW" -> product.basePrice.asc();
+            case "PRICE_HIGH" -> product.basePrice.desc();
+            default -> product.createdAt.desc();
+        };
+
+        List<ProductEntity> entities = queryFactory
+                .selectFrom(product)
+                .where(condition)
+                .orderBy(orderBy)
+                .limit(limit + 1)
+                .fetch();
+
+        return entities.stream()
+                .map(ProductPreviewResponse::from)
+                .toList();
     }
 
     @Override

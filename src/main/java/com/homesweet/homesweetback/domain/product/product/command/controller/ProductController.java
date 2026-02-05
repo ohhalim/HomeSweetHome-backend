@@ -50,6 +50,18 @@ public class ProductController {
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
+    // [모두] 상품 프리뷰 목록 조회 (무한 스크롤)
+    @GetMapping("/previews")
+    public ResponseEntity<ProductPreviewPageResponse> getProductPreviews(
+            @RequestParam(required = false) Long categoryId,
+            @RequestParam(required = false) Long cursorId,
+            @RequestParam(defaultValue = "12") int limit,
+            @RequestParam(defaultValue = "LATEST") String sortType
+    ) {
+        ProductPreviewPageResponse response = service.getProductPreviews(categoryId, cursorId, limit, sortType);
+        return ResponseEntity.ok(response);
+    }
+
     // [모두] 제품 상세 페이지 조회
     @GetMapping("/{productId}")
     public ResponseEntity<ProductDetailResponse> getProductDetail(@PathVariable Long productId) {

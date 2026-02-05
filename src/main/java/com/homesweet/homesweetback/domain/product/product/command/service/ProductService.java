@@ -26,6 +26,8 @@ public interface ProductService {
 
     List<ProductManageResponse> getSellerProducts(Long sellerId, String startDate, String endDate);
 
+    ProductPreviewPageResponse getProductPreviews(Long categoryId, Long cursorId, int limit, String sortType);
+
     void updateBasicInfo(Long sellerId, Long productId, ProductBasicInfoUpdateRequest request);
 
     void updateSkuStock(Long sellerId, Long productId, ProductSkuUpdateRequest request);
@@ -35,3 +37,4 @@ public interface ProductService {
     void updateImages(Long sellerId, Long productId, ProductImageUpdateRequest request);
 
 }
+
