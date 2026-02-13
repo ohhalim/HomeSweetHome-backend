@@ -3,9 +3,9 @@ package com.homesweet.homesweetback.domain.order.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
@@ -163,7 +163,34 @@ class OrderServiceTest {
             assertThat(response).isNotNull();
             assertThat(response.getTotalAmount()).isEqualTo(35000L);
             verify(orderRepository, times(1)).save(any(Order.class));
+            verify(cartJPARepository, times(1)).deleteAllByUserIdAndIdIn(userId, List.of(1L, 2L));
 
+        }
+
+        @Test
+        @DisplayName("주문 생성 성공 - 중복 skuId 병합")
+        void createOrder_Success_MergeDuplicateSku() {
+            // given
+            Long userId = 1L;
+            CreateOrderRequest request = createRequest(List.of(
+                    createOrderItem(null, 1L, 2),
+                    createOrderItem(null, 1L, 1)
+            ));
+
+            User user = createTestUser(userId);
+            SkuEntity sku1 = createTestSku(1L, 10000L);
+
+            given(userRepository.findById(userId)).willReturn(Optional.of(user));
+            given(skuJPARepository.findAllByIdWithProduct(List.of(1L))).willReturn(List.of(sku1));
+            given(orderRepository.save(any(Order.class))).willAnswer(invocation -> invocation.getArgument(0));
+
+            // when
+            OrderResponse response = orderService.createFromCart(userId, request);
+
+            // then
+            assertThat(response).isNotNull();
+            assertThat(response.getTotalAmount()).isEqualTo(30000L);
+            verify(cartJPARepository, never()).deleteAllByUserIdAndIdIn(any(), any());
         }
 
         @Test
@@ -260,14 +287,14 @@ class OrderServiceTest {
                     createTestOrder(2L, user, OrderStatus.PAID)
             );
 
-            given(orderRepository.findByUserIdOrderByCreatedAtDesc(userId)).willReturn(orders);
+            given(orderRepository.findByUserIdWithItemsAndProduct(userId)).willReturn(orders);
 
             // when
             List<OrderResponse> responses = orderService.getMyOrders(userId);
 
             // then
             assertThat(responses).hasSize(2);
-            verify(orderRepository, times(1)).findByUserIdOrderByCreatedAtDesc(userId);
+            verify(orderRepository, times(1)).findByUserIdWithItemsAndProduct(userId);
         }
 
         @Test
@@ -276,7 +303,7 @@ class OrderServiceTest {
             // given
             Long userId = 1L;
 
-            given(orderRepository.findByUserIdOrderByCreatedAtDesc(userId)).willReturn(List.of());
+            given(orderRepository.findByUserIdWithItemsAndProduct(userId)).willReturn(List.of());
 
             // when
             List<OrderResponse> responses = orderService.getMyOrders(userId);

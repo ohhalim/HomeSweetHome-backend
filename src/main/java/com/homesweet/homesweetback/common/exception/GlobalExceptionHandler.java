@@ -5,8 +5,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
-import org.springframework.web.multipart.support.MissingServletRequestPartException;
-import com.homesweet.homesweetback.common.exception.StockInsufficientException; // ★ import 추가
+import org.springframework.web.bind.MethodArgumentNotValidException;
 
 /**
  * 공통 예외 처리
@@ -26,6 +25,30 @@ public class GlobalExceptionHandler {
         ErrorResponse errorResponse = ErrorResponse.of(errorCode.getStatus(), errorCode.getMessage());
 
         return ResponseEntity.status(errorCode.getStatus()).body(errorResponse);
+    }
+
+    // 잘못된 요청 값
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<ErrorResponse> handleIllegalArgument(IllegalArgumentException ex) {
+        log.warn("[Bad Request]: {}", ex.getMessage(), ex);
+        ErrorResponse errorResponse = ErrorResponse.of(HttpStatus.BAD_REQUEST, ex.getMessage());
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorResponse);
+    }
+
+    // 잘못된 비즈니스 상태(중복 처리 등)
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<ErrorResponse> handleIllegalState(IllegalStateException ex) {
+        log.warn("[Conflict]: {}", ex.getMessage(), ex);
+        ErrorResponse errorResponse = ErrorResponse.of(HttpStatus.CONFLICT, ex.getMessage());
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(errorResponse);
+    }
+
+    // Validation 실패
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<ErrorResponse> handleValidation(MethodArgumentNotValidException ex) {
+        log.warn("[Validation Failed]: {}", ex.getMessage(), ex);
+        ErrorResponse errorResponse = ErrorResponse.of(HttpStatus.BAD_REQUEST, "입력값이 올바르지 않습니다.");
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorResponse);
     }
 
     // 그 외 모든 예외

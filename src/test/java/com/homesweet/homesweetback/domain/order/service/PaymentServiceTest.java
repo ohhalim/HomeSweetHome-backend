@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
@@ -91,6 +92,7 @@ class PaymentServiceTest {
         given(order.getOrderNumber()).willReturn(orderNumber);
         given(order.getTotalAmount()).willReturn(amount);
         given(order.isOwner(user.getId())).willReturn(true);
+        given(order.isPending()).willReturn(true);
         return order;
     }
 
@@ -142,7 +144,7 @@ class PaymentServiceTest {
                     "approvedAt", "2026-01-21T10:00:05+09:00"
             );
 
-            given(orderRepository.findByOrderNumberWithItems(orderNumber)).willReturn(Optional.of(order));
+            given(orderRepository.findByOrderNumberWithItemsForUpdate(orderNumber)).willReturn(Optional.of(order));
             given(tossPaymentsService.confirmPayment(request)).willReturn(tossResponse);
             given(paymentRepository.save(any(Payment.class))).willAnswer(inv -> inv.getArgument(0));
 
@@ -151,10 +153,62 @@ class PaymentServiceTest {
 
             // then
             assertThat(response).isNotNull();
-            verify(orderRepository, times(1)).findByOrderNumberWithItems(orderNumber);
+            verify(orderRepository, times(1)).findByOrderNumberWithItemsForUpdate(orderNumber);
             verify(tossPaymentsService, times(1)).confirmPayment(request);
             verify(paymentRepository, times(1)).save(any(Payment.class));
             verify(order, times(1)).pay();
+        }
+
+        @Test
+        @DisplayName("결제 승인 중복 요청 - 기존 결제 재활용")
+        void confirmPayment_Idempotent_ReturnExisting() {
+            // given
+            Long userId = 1L;
+            String orderNumber = "TEST-ORDER-001";
+            Long amount = 100000L;
+            String paymentKey = "test_payment_key_123";
+
+            User user = createTestUser(userId);
+            Order order = createTestOrder(1L, user, orderNumber, amount);
+            Payment existingPayment = createTestPayment(10L, order, paymentKey);
+
+            TossPaymentConfirmRequest request = new TossPaymentConfirmRequest(paymentKey, orderNumber, amount);
+
+            given(orderRepository.findByOrderNumberWithItemsForUpdate(orderNumber)).willReturn(Optional.of(order));
+            given(paymentRepository.findByOrder(order)).willReturn(Optional.of(existingPayment));
+
+            // when
+            PaymentResponse response = paymentService.confirmPayment(userId, request);
+
+            // then
+            assertThat(response).isNotNull();
+            assertThat(response.getPaymentId()).isEqualTo(existingPayment.getId());
+            verify(tossPaymentsService, never()).confirmPayment(request);
+            verify(paymentRepository, never()).save(any(Payment.class));
+            verify(order, never()).pay();
+        }
+
+        @Test
+        @DisplayName("결제 승인 실패 - 중복 결제키 충돌")
+        void confirmPayment_Fail_DuplicatePaymentKeyMismatch() {
+            // given
+            Long userId = 1L;
+            String orderNumber = "TEST-ORDER-001";
+            Long amount = 100000L;
+
+            User user = createTestUser(userId);
+            Order order = createTestOrder(1L, user, orderNumber, amount);
+            Payment existingPayment = createTestPayment(10L, order, "other_payment_key");
+
+            TossPaymentConfirmRequest request = new TossPaymentConfirmRequest("test_payment_key_123", orderNumber, amount);
+
+            given(orderRepository.findByOrderNumberWithItemsForUpdate(orderNumber)).willReturn(Optional.of(order));
+            given(paymentRepository.findByOrder(order)).willReturn(Optional.of(existingPayment));
+
+            // when & then
+            assertThatThrownBy(() -> paymentService.confirmPayment(userId, request))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("이미 결제 요청이 처리 중이거나 완료된 주문입니다.");
         }
 
         @Test
@@ -165,7 +219,7 @@ class PaymentServiceTest {
             String orderNumber = "INVALID-ORDER";
             TossPaymentConfirmRequest request = new TossPaymentConfirmRequest("key", orderNumber, 10000L);
 
-            given(orderRepository.findByOrderNumberWithItems(orderNumber)).willReturn(Optional.empty());
+            given(orderRepository.findByOrderNumberWithItemsForUpdate(orderNumber)).willReturn(Optional.empty());
 
             // when & then
             assertThatThrownBy(() -> paymentService.confirmPayment(userId, request))
@@ -185,7 +239,7 @@ class PaymentServiceTest {
             // 요청 금액이 주문 금액과 다름
             TossPaymentConfirmRequest request = new TossPaymentConfirmRequest("key", orderNumber, 50000L);
 
-            given(orderRepository.findByOrderNumberWithItems(orderNumber)).willReturn(Optional.of(order));
+            given(orderRepository.findByOrderNumberWithItemsForUpdate(orderNumber)).willReturn(Optional.of(order));
 
             // when & then
             assertThatThrownBy(() -> paymentService.confirmPayment(userId, request))
@@ -208,7 +262,7 @@ class PaymentServiceTest {
 
             TossPaymentConfirmRequest request = new TossPaymentConfirmRequest("key", orderNumber, 100000L);
 
-            given(orderRepository.findByOrderNumberWithItems(orderNumber)).willReturn(Optional.of(order));
+            given(orderRepository.findByOrderNumberWithItemsForUpdate(orderNumber)).willReturn(Optional.of(order));
 
             // when & then
             assertThatThrownBy(() -> paymentService.confirmPayment(userId, request))

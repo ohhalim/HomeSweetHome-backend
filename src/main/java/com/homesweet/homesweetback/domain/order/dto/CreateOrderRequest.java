@@ -1,11 +1,15 @@
 package com.homesweet.homesweetback.domain.order.dto;
 
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
@@ -20,6 +24,7 @@ public class CreateOrderRequest {
      * 주문 상품 목록
      */
     @NotEmpty(message = "최소 하나 이상의 상품이 필요합니다.")
+    @Valid
     private List<OrderItemRequest> orderItems;
 
     /**
@@ -54,6 +59,8 @@ public class CreateOrderRequest {
         }
         return orderItems.stream()
                 .map(OrderItemRequest::getCartId)
+                .filter(Objects::nonNull)
+                .distinct()
                 .collect(Collectors.toList());
     }
 
@@ -64,8 +71,14 @@ public class CreateOrderRequest {
     @NoArgsConstructor
     public static class OrderItemRequest {
         private Long cartId;
+
+        @NotNull(message = "skuId는 필수입니다.")
         private Long skuId;
+
+        @NotNull(message = "수량은 필수입니다.")
+        @Positive(message = "수량은 1개 이상이어야 합니다.")
         private Integer quantity;
+
         private String productName;
         private Long price;
     }

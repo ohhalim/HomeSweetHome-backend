@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import java.util.LinkedHashMap;
 
 /**
  * 주문 서비스 구현체
@@ -55,10 +56,24 @@ public class OrderServiceImpl implements OrderService {
             throw new IllegalArgumentException("주문할 상품이 없습니다.");
         }
 
-        // SKU ID 목록 추출
-        List<Long> skuIds = orderItemRequests.stream()
-                .map(OrderItemRequest::getSkuId)
-                .collect(Collectors.toList());
+        // 내부 호출 대비 방어 검증 (컨트롤러 경유 시 DTO @NotNull/@Positive가 1차 차단)
+        for (OrderItemRequest item : orderItemRequests) {
+            if (item.getSkuId() == null) {
+                throw new IllegalArgumentException("skuId는 필수입니다.");
+            }
+            if (item.getQuantity() == null || item.getQuantity() <= 0) {
+                throw new IllegalArgumentException("수량은 1개 이상이어야 합니다.");
+            }
+        }
+
+        Map<Long, Integer> skuQuantitiesById = orderItemRequests.stream()
+                .collect(Collectors.groupingBy(
+                        OrderItemRequest::getSkuId,
+                        LinkedHashMap::new,
+                        Collectors.summingInt(OrderItemRequest::getQuantity)
+                ));
+
+        List<Long> skuIds = skuQuantitiesById.keySet().stream().toList();
 
         // SKU 조회 (Product fetch join)
         List<SkuEntity> skus = skuJPARepository.findAllByIdWithProduct(skuIds);
@@ -70,17 +85,16 @@ public class OrderServiceImpl implements OrderService {
         // SKU ID -> SKU Entity 매핑
         Map<Long, SkuEntity> skuMap = skus.stream()
                 .collect(Collectors.toMap(SkuEntity::getId, s -> s));
+        if (skuMap.size() != skuQuantitiesById.size()) {
+            throw new IllegalArgumentException("상품을 찾을 수 없습니다.");
+        }
 
         // 총액 계산
         long totalAmount = 0L;
-        for (OrderItemRequest item : orderItemRequests) {
-            SkuEntity sku = skuMap.get(item.getSkuId());
-            if (sku == null) {
-                throw new IllegalArgumentException("상품을 찾을 수 없습니다. skuId=" + item.getSkuId());
-            }
-            int quantity = item.getQuantity() != null ? item.getQuantity() : 1;
+        for (Map.Entry<Long, Integer> entry : skuQuantitiesById.entrySet()) {
+            SkuEntity sku = skuMap.get(entry.getKey());
             long unitPrice = sku.getFinalPrice();
-            totalAmount += unitPrice * quantity;
+            totalAmount += unitPrice * entry.getValue();
         }
 
         // 주문 생성
@@ -93,9 +107,9 @@ public class OrderServiceImpl implements OrderService {
                 .build();
 
         // 주문 상품 추가
-        for (OrderItemRequest item : orderItemRequests) {
-            SkuEntity sku = skuMap.get(item.getSkuId());
-            int quantity = item.getQuantity() != null ? item.getQuantity() : 1;
+        for (Map.Entry<Long, Integer> entry : skuQuantitiesById.entrySet()) {
+            SkuEntity sku = skuMap.get(entry.getKey());
+            int quantity = entry.getValue();
             long unitPrice = sku.getFinalPrice();
 
             OrderItem orderItem = OrderItem.builder()
@@ -114,8 +128,8 @@ public class OrderServiceImpl implements OrderService {
         // 장바구니에서 주문된 상품 삭제
         List<Long> cartIds = request.getCartIds();
         if (cartIds != null && !cartIds.isEmpty()) {
-            cartJPARepository.deleteCartItemNative(userId, skuIds);
-            log.info("장바구니에서 상품 삭제 완료: userId={}, skuIds={}", userId, skuIds);
+            cartJPARepository.deleteAllByUserIdAndIdIn(userId, cartIds);
+            log.info("장바구니에서 상품 삭제 완료: userId={}, cartIds={}", userId, cartIds);
         }
 
         return OrderResponse.from(savedOrder);
@@ -141,7 +155,7 @@ public class OrderServiceImpl implements OrderService {
      */
     @Override
     public List<OrderResponse> getMyOrders(Long userId) {
-        List<Order> orders = orderRepository.findByUserIdOrderByCreatedAtDesc(userId);
+        List<Order> orders = orderRepository.findByUserIdWithItemsAndProduct(userId);
         return orders.stream()
                 .map(OrderResponse::from)
                 .toList();
