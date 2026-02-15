@@ -87,6 +87,10 @@ app:
   # 토스 페이먼츠 시크릿 키
 payments:
   toss:
+    mock:
+      enabled: true
+    connect-timeout-ms: 2000
+    read-timeout-ms: 5000
     secretKey: ${TOSS_PAYMENTS_SECRET_KEY}
 
 search:

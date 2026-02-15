@@ -52,6 +52,10 @@ app:
 
 payments:
   toss:
+    mock:
+      enabled: true
+    connect-timeout-ms: 2000
+    read-timeout-ms: 5000
     secretKey: ${TOSS_PAYMENTS_SECRET_KEY:test_sk_dummy_key}
 
 search:

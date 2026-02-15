@@ -2,9 +2,9 @@ server:
   port: 8080
   tomcat:
     threads:
-      max: 500
-      min-spare: 50
-    accept-count: 2000 # OS 레벨 대기열 크기
+      max: 250
+      min-spare: 40
+    accept-count: 1000 # OS 레벨 대기열 크기
     max-connections: 10000
     connection-timeout: 20000
 
@@ -19,7 +19,9 @@ spring:
     username: user
     password: password
     hikari:
-      maximum-pool-size: 150
+      maximum-pool-size: 120
+      minimum-idle: 20
+      connection-timeout: 2000
 
   jpa:
     hibernate:
@@ -100,6 +102,10 @@ log:
 # 토스페이먼츠 설정
 payments:
   toss:
+    mock:
+      enabled: false
+    connect-timeout-ms: 2000
+    read-timeout-ms: 5000
     secretKey: ${TOSS_PAYMENTS_SECRET_KEY}
 
 management:
@@ -117,4 +123,3 @@ management:
     metrics:
       export:
         enabled: true
-

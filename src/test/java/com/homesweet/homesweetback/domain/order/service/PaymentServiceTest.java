@@ -3,6 +3,7 @@ package com.homesweet.homesweetback.domain.order.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -31,14 +32,10 @@ import com.homesweet.homesweetback.domain.order.dto.PaymentResponse;
 import com.homesweet.homesweetback.domain.order.dto.TossPaymentCancelRequest;
 import com.homesweet.homesweetback.domain.order.dto.TossPaymentConfirmRequest;
 import com.homesweet.homesweetback.domain.order.entity.Order;
-import com.homesweet.homesweetback.domain.order.entity.OrderItem;
 import com.homesweet.homesweetback.domain.order.entity.OrderStatus;
 import com.homesweet.homesweetback.domain.order.entity.Payment;
 import com.homesweet.homesweetback.domain.order.entity.PaymentStatus;
-import com.homesweet.homesweetback.domain.order.repository.OrderRepository;
 import com.homesweet.homesweetback.domain.order.repository.PaymentRepository;
-import com.homesweet.homesweetback.domain.product.cart.repository.jpa.CartJPARepository;
-import com.homesweet.homesweetback.domain.product.product.command.repository.jpa.entity.SkuEntity;
 
 /**
  * PaymentService 단위 테스트
@@ -65,10 +62,10 @@ class PaymentServiceTest {
     private PaymentRepository paymentRepository;
 
     @Mock
-    private OrderRepository orderRepository;
+    private PaymentTransactionalService paymentTransactionalService;
 
     @Mock
-    private CartJPARepository cartJPARepository;
+    private PaymentRedisGuardService paymentRedisGuardService;
 
     @InjectMocks
     private PaymentServiceImpl paymentService;
@@ -116,25 +113,11 @@ class PaymentServiceTest {
         @Test
         @DisplayName("결제 승인 성공")
         void confirmPayment_Success() {
-            // given
             Long userId = 1L;
             String orderNumber = "TEST-ORDER-001";
             Long amount = 100000L;
             String paymentKey = "test_payment_key_123";
-
-            User user = createTestUser(userId);
-            Order order = createTestOrder(1L, user, orderNumber, amount);
-
-            // OrderItem mock 설정
-            OrderItem orderItem = mock(OrderItem.class);
-            SkuEntity sku = mock(SkuEntity.class);
-            given(sku.getId()).willReturn(1L);
-            given(orderItem.getSku()).willReturn(sku);
-            given(order.getOrderItems()).willReturn(List.of(orderItem));
-
             TossPaymentConfirmRequest request = new TossPaymentConfirmRequest(paymentKey, orderNumber, amount);
-
-            // 토스 응답 mock
             Map<String, Object> tossResponse = Map.of(
                     "paymentKey", paymentKey,
                     "orderId", orderNumber,
@@ -143,26 +126,25 @@ class PaymentServiceTest {
                     "requestedAt", "2026-01-21T10:00:00+09:00",
                     "approvedAt", "2026-01-21T10:00:05+09:00"
             );
+            PaymentResponse expected = PaymentResponse.builder().paymentId(1L).paymentKey(paymentKey).build();
 
-            given(orderRepository.findByOrderNumberWithItemsForUpdate(orderNumber)).willReturn(Optional.of(order));
+            given(paymentRedisGuardService.tryAcquireIdempotency(paymentKey)).willReturn(true);
+            given(paymentRedisGuardService.tryAcquireOrderLock(orderNumber)).willReturn("lock-token");
             given(tossPaymentsService.confirmPayment(request)).willReturn(tossResponse);
-            given(paymentRepository.save(any(Payment.class))).willAnswer(inv -> inv.getArgument(0));
+            given(paymentTransactionalService.persistConfirmedPayment(userId, request, tossResponse)).willReturn(expected);
 
-            // when
             PaymentResponse response = paymentService.confirmPayment(userId, request);
 
-            // then
             assertThat(response).isNotNull();
-            verify(orderRepository, times(1)).findByOrderNumberWithItemsForUpdate(orderNumber);
             verify(tossPaymentsService, times(1)).confirmPayment(request);
-            verify(paymentRepository, times(1)).save(any(Payment.class));
-            verify(order, times(1)).pay();
+            verify(paymentTransactionalService, times(1)).persistConfirmedPayment(userId, request, tossResponse);
+            verify(paymentRedisGuardService, times(1)).markIdempotencyCompleted(paymentKey);
+            verify(paymentRedisGuardService, times(1)).releaseOrderLock(orderNumber, "lock-token");
         }
 
         @Test
         @DisplayName("결제 승인 중복 요청 - 기존 결제 재활용")
         void confirmPayment_Idempotent_ReturnExisting() {
-            // given
             Long userId = 1L;
             String orderNumber = "TEST-ORDER-001";
             Long amount = 100000L;
@@ -174,100 +156,94 @@ class PaymentServiceTest {
 
             TossPaymentConfirmRequest request = new TossPaymentConfirmRequest(paymentKey, orderNumber, amount);
 
-            given(orderRepository.findByOrderNumberWithItemsForUpdate(orderNumber)).willReturn(Optional.of(order));
-            given(paymentRepository.findByOrder(order)).willReturn(Optional.of(existingPayment));
+            given(paymentRedisGuardService.tryAcquireIdempotency(paymentKey)).willReturn(false);
+            given(paymentRepository.findByPaymentKey(paymentKey)).willReturn(Optional.of(existingPayment));
 
-            // when
             PaymentResponse response = paymentService.confirmPayment(userId, request);
 
-            // then
             assertThat(response).isNotNull();
             assertThat(response.getPaymentId()).isEqualTo(existingPayment.getId());
             verify(tossPaymentsService, never()).confirmPayment(request);
-            verify(paymentRepository, never()).save(any(Payment.class));
-            verify(order, never()).pay();
+            verify(paymentTransactionalService, never()).persistConfirmedPayment(any(), any(), any());
         }
 
         @Test
-        @DisplayName("결제 승인 실패 - 중복 결제키 충돌")
-        void confirmPayment_Fail_DuplicatePaymentKeyMismatch() {
-            // given
+        @DisplayName("결제 승인 실패 - 이미 처리 중인 요청")
+        void confirmPayment_Fail_AlreadyProcessing() {
             Long userId = 1L;
             String orderNumber = "TEST-ORDER-001";
             Long amount = 100000L;
-
-            User user = createTestUser(userId);
-            Order order = createTestOrder(1L, user, orderNumber, amount);
-            Payment existingPayment = createTestPayment(10L, order, "other_payment_key");
-
             TossPaymentConfirmRequest request = new TossPaymentConfirmRequest("test_payment_key_123", orderNumber, amount);
 
-            given(orderRepository.findByOrderNumberWithItemsForUpdate(orderNumber)).willReturn(Optional.of(order));
-            given(paymentRepository.findByOrder(order)).willReturn(Optional.of(existingPayment));
+            given(paymentRedisGuardService.tryAcquireIdempotency(request.getPaymentKey())).willReturn(false);
+            given(paymentRepository.findByPaymentKey(request.getPaymentKey())).willReturn(Optional.empty());
 
-            // when & then
             assertThatThrownBy(() -> paymentService.confirmPayment(userId, request))
                     .isInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("이미 결제 요청이 처리 중이거나 완료된 주문입니다.");
+                    .hasMessageContaining("이미 처리 중인 결제 요청입니다.");
         }
 
         @Test
-        @DisplayName("결제 승인 실패 - 주문 없음")
-        void confirmPayment_Fail_OrderNotFound() {
-            // given
+        @DisplayName("결제 승인 실패 - 주문 락 획득 실패")
+        void confirmPayment_Fail_OrderLockAcquire() {
             Long userId = 1L;
-            String orderNumber = "INVALID-ORDER";
-            TossPaymentConfirmRequest request = new TossPaymentConfirmRequest("key", orderNumber, 10000L);
+            String orderNumber = "TEST-ORDER-001";
+            TossPaymentConfirmRequest request = new TossPaymentConfirmRequest("key", orderNumber, 100000L);
 
-            given(orderRepository.findByOrderNumberWithItemsForUpdate(orderNumber)).willReturn(Optional.empty());
+            given(paymentRedisGuardService.tryAcquireIdempotency("key")).willReturn(true);
+            given(paymentRedisGuardService.tryAcquireOrderLock(orderNumber)).willReturn(null);
 
-            // when & then
             assertThatThrownBy(() -> paymentService.confirmPayment(userId, request))
-                    .isInstanceOf(OrderNotFoundException.class)
-                    .hasMessageContaining("주문을 찾을 수 없습니다");
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("이미 해당 주문의 결제가 처리 중입니다.");
+
+            verify(paymentRedisGuardService, times(1)).clearIdempotency("key");
+            verify(tossPaymentsService, never()).confirmPayment(any());
         }
 
         @Test
         @DisplayName("결제 승인 실패 - 금액 불일치")
         void confirmPayment_Fail_AmountMismatch() {
-            // given
             Long userId = 1L;
             String orderNumber = "TEST-ORDER-001";
-            User user = createTestUser(userId);
-            Order order = createTestOrder(1L, user, orderNumber, 100000L);
-
-            // 요청 금액이 주문 금액과 다름
             TossPaymentConfirmRequest request = new TossPaymentConfirmRequest("key", orderNumber, 50000L);
+            Map<String, Object> tossResponse = Map.of("status", "DONE");
 
-            given(orderRepository.findByOrderNumberWithItemsForUpdate(orderNumber)).willReturn(Optional.of(order));
+            given(paymentRedisGuardService.tryAcquireIdempotency("key")).willReturn(true);
+            given(paymentRedisGuardService.tryAcquireOrderLock(orderNumber)).willReturn("lock-token");
+            given(tossPaymentsService.confirmPayment(request)).willReturn(tossResponse);
+            given(paymentTransactionalService.persistConfirmedPayment(userId, request, tossResponse))
+                    .willThrow(new PaymentMismatchException("결제 금액이 주문 금액과 일치하지 않습니다."));
 
-            // when & then
             assertThatThrownBy(() -> paymentService.confirmPayment(userId, request))
                     .isInstanceOf(PaymentMismatchException.class)
-                    .hasMessageContaining("결제 금액이 주문 금액과 일치하지 않습니다");
+                    .hasMessageContaining("결제 금액이 주문 금액과 일치하지 않습니다.");
+
+            verify(tossPaymentsService, times(1)).cancelPayment(anyString(), any(TossPaymentCancelRequest.class));
+            verify(paymentRedisGuardService, times(1)).clearIdempotency("key");
+            verify(paymentRedisGuardService, times(1)).releaseOrderLock(orderNumber, "lock-token");
         }
 
         @Test
-        @DisplayName("결제 승인 실패 - 권한 없음 (다른 사용자의 주문)")
-        void confirmPayment_Fail_NotOwner() {
-            // given
+        @DisplayName("결제 승인 실패 - 주문 없음")
+        void confirmPayment_Fail_OrderNotFound() {
             Long userId = 1L;
-            Long otherUserId = 2L;
             String orderNumber = "TEST-ORDER-001";
-
-            User otherUser = createTestUser(otherUserId);
-            Order order = mock(Order.class);
-            given(order.getTotalAmount()).willReturn(100000L);
-            given(order.isOwner(userId)).willReturn(false);
-
             TossPaymentConfirmRequest request = new TossPaymentConfirmRequest("key", orderNumber, 100000L);
+            Map<String, Object> tossResponse = Map.of("status", "DONE");
 
-            given(orderRepository.findByOrderNumberWithItemsForUpdate(orderNumber)).willReturn(Optional.of(order));
+            given(paymentRedisGuardService.tryAcquireIdempotency("key")).willReturn(true);
+            given(paymentRedisGuardService.tryAcquireOrderLock(orderNumber)).willReturn("lock-token");
+            given(tossPaymentsService.confirmPayment(request)).willReturn(tossResponse);
+            given(paymentTransactionalService.persistConfirmedPayment(userId, request, tossResponse))
+                    .willThrow(new OrderNotFoundException("주문을 찾을 수 없습니다."));
 
-            // when & then
             assertThatThrownBy(() -> paymentService.confirmPayment(userId, request))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("본인의 주문만 결제할 수 있습니다");
+                    .isInstanceOf(OrderNotFoundException.class);
+
+            verify(tossPaymentsService, times(1)).cancelPayment(anyString(), any(TossPaymentCancelRequest.class));
+            verify(paymentRedisGuardService, times(1)).clearIdempotency("key");
+            verify(paymentRedisGuardService, times(1)).releaseOrderLock(orderNumber, "lock-token");
         }
     }
 

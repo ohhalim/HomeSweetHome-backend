@@ -75,14 +75,21 @@ management:
 retry:
   instances:
     toss-payments-retry: # 재시도 설정 이름
-      maxRetryAttempts: 3        # 최대 3번까지 시도 (최초 1회 + 재시도 2회)
-      waitDuration: 500ms        # 재시도 사이의 간격 (0.5초)
+      maxRetryAttempts: 2        # 최대 2번까지 시도 (최초 1회 + 재시도 1회)
+      waitDuration: 200ms        # 재시도 사이의 간격 (0.2초)
       retryExceptions:           # 재시도할 예외 타입 (모든 에러를 다 재시도하진 않음)
         - java.io.IOException    # 네트워크 연결 오류
         - org.springframework.web.client.ResourceAccessException # 타임아웃 등
         - java.net.ConnectException
       ignoreExceptions:
         - org.springframework.web.client.HttpClientErrorException
+
+payments:
+  toss:
+    mock:
+      enabled: false
+    connect-timeout-ms: 2000
+    read-timeout-ms: 5000
 
 # Community 도메인 설정
 community:

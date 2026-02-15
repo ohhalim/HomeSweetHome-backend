@@ -5,6 +5,7 @@ import com.homesweet.homesweetback.common.util.PaymentApiClient;
 import com.homesweet.homesweetback.domain.order.dto.TossPaymentCancelRequest;
 import com.homesweet.homesweetback.domain.order.dto.TossPaymentConfirmRequest;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Primary;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
@@ -29,6 +30,7 @@ import java.util.UUID;
 @Service
 @Primary
 @Profile({"test", "dev", "local"})
+@ConditionalOnProperty(name = "payments.toss.mock.enabled", havingValue = "true")
 public class MockTossPaymentsService extends TossPaymentsService {
 
     // 부모 클래스의 필드를 주입받지만 Mock에서는 사용하지 않음
@@ -36,7 +38,7 @@ public class MockTossPaymentsService extends TossPaymentsService {
                                    PaymentApiClient paymentApiClient, 
                                    RestTemplate restTemplate) {
         super(tossPaymentsConfig, paymentApiClient, restTemplate);
-        log.info("🎭 Mock TossPaymentsService 활성화 - 실제 API 호출 없이 테스트합니다");
+        log.info("Mock TossPaymentsService enabled");
     }
 
     @Override
