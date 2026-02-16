@@ -27,12 +27,6 @@ spring:
             client-secret: ${GOOGLE_CLIENT_SECRET}
             scope: email, profile
 
-toss:
-  payments:
-    secret-key: ${TOSS_SECRET_KEY:test_sk_XXXX}
-    client-key: ${TOSS_CLIENT_KEY:test_ck_XXXX}
-    base-url: https://api.tosspayments.com/v1
-
 logging:
   level:
     com.homesweet: DEBUG
@@ -56,7 +50,7 @@ payments:
       enabled: true
     connect-timeout-ms: 2000
     read-timeout-ms: 5000
-    secretKey: ${TOSS_PAYMENTS_SECRET_KEY:test_sk_dummy_key}
+    secretKey: ${TOSS_PAYMENTS_SECRET_KEY:${TOSS_SECRET_KEY:test_sk_dummy_key}}
 
 search:
   elasticsearch:

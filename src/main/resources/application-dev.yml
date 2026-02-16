@@ -106,7 +106,7 @@ payments:
       enabled: false
     connect-timeout-ms: 2000
     read-timeout-ms: 5000
-    secretKey: ${TOSS_PAYMENTS_SECRET_KEY}
+    secretKey: ${TOSS_PAYMENTS_SECRET_KEY:${TOSS_SECRET_KEY:}}
 
 management:
   endpoints:

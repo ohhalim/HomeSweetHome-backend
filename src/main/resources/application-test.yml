@@ -84,14 +84,13 @@ app:
   cors:
     allowed-origins: http://localhost:3000,http://127.0.0.1:3000
 
-  # 토스 페이먼츠 시크릿 키
 payments:
   toss:
     mock:
       enabled: true
     connect-timeout-ms: 2000
     read-timeout-ms: 5000
-    secretKey: ${TOSS_PAYMENTS_SECRET_KEY}
+    secretKey: ${TOSS_PAYMENTS_SECRET_KEY:${TOSS_SECRET_KEY:}}
 
 search:
   elasticsearch:

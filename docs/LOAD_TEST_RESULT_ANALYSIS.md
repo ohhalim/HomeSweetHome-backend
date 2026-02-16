@@ -1,5 +1,31 @@
 # 결제 부하 테스트 결과 분석 및 해결 방안
 
+## 2026-02-15 후속 반영 사항
+
+- `TossPaymentsService`에서 PG 예외를 분리 처리:
+  - `401` 인증 오류: `TossApiAuthenticationException`
+  - `4xx` 요청 오류: `TossApiClientException`
+  - `5xx/기타` 연동 오류: `TossApiFailedException`
+- `resilience4j` 설정 보정:
+  - `retry.instances` -> `resilience4j.retry.instances`로 수정
+  - `HttpClientErrorException`(401 포함) 재시도 제외 적용
+  - `4xx/인증 오류`는 circuit breaker 실패율 집계에서 제외
+- Toss 시크릿키 환경변수 fallback 추가:
+  - `TOSS_PAYMENTS_SECRET_KEY` 우선, 없으면 `TOSS_SECRET_KEY` 사용
+- `k6/local-payment-test.js`는 mock 전용으로 가드 추가 (`USE_REAL_TOSS=true`면 즉시 실패)
+- 실제 PG 인증 스모크용 스크립트 추가:
+  - `k6/payment-confirm-smoke.js`
+  - 실행 예시:
+    ```bash
+    k6 run \
+      -e BASE_URL=http://localhost:8080 \
+      -e ACCESS_TOKEN='<JWT>' \
+      -e PAYMENT_KEY='<TOSS_PAYMENT_KEY>' \
+      -e ORDER_ID='<TOSS_ORDER_ID>' \
+      -e AMOUNT='<AMOUNT>' \
+      k6/payment-confirm-smoke.js
+    ```
+
 ## 테스트 결과 요약
 
 ### ✅ 성공 사항

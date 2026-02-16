@@ -7,6 +7,7 @@ const orderCreationErrors = new Counter('order_creation_errors');
 const paymentConfirmErrors = new Counter('payment_confirm_errors');
 const orderCreationDuration = new Trend('order_creation_duration');
 const paymentConfirmDuration = new Trend('payment_confirm_duration');
+const useRealToss = (__ENV.USE_REAL_TOSS || 'false').toLowerCase() === 'true';
 
 export const options = {
     stages: [
@@ -91,6 +92,7 @@ export default function () {
 
     // ===== 2단계: 결제 승인 =====
     const paymentPayload = JSON.stringify({
+        // 이 스크립트는 mock 결제 전용: 실제 Toss 결제키가 아닌 테스트용 키를 사용한다.
         paymentKey: `test_payment_${orderNumber}_${Date.now()}`,
         orderId: orderNumber,
         amount: totalAmount,
@@ -127,10 +129,15 @@ export default function () {
 
 // 테스트 셋업 (선택적)
 export function setup() {
+    if (useRealToss) {
+        throw new Error('local-payment-test.js는 mock 결제 전용입니다. 실제 Toss 연동 검증은 별도 smoke 스크립트를 사용하세요.');
+    }
+
     console.log('🚀 결제 부하 테스트 시작');
     console.log(`📊 타겟: localhost:8080`);
     console.log(`👥 테스트 사용자: ${testUsers.length}명`);
     console.log(`📦 테스트 상품: ${testSkus.length}개`);
+    console.log('🧪 모드: MOCK 결제 (가짜 paymentKey 사용)');
 }
 
 // 테스트 종료 후 요약 (선택적)

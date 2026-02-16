@@ -59,6 +59,20 @@ resilience4j:
         waitDurationInOpenState: 10s   # 차단 후 10초 동안은 무조건 요청 거부 (쉬는 시간)
         permittedNumberOfCallsInHalfOpenState: 3 # 10초 뒤 '반열림' 상태에서 3번만 테스트로 찔러봄
         automaticTransitionFromOpenToHalfOpenEnabled: true # 시간이 지나면 자동으로 반열림 상태로 전환
+        ignoreExceptions:
+          - com.homesweet.homesweetback.common.exception.TossApiClientException
+          - com.homesweet.homesweetback.common.exception.TossApiAuthenticationException
+  retry:
+    instances:
+      toss-payments-retry:
+        max-attempts: 2
+        wait-duration: 200ms
+        retry-exceptions:
+          - java.io.IOException
+          - org.springframework.web.client.ResourceAccessException
+          - java.net.ConnectException
+        ignore-exceptions:
+          - org.springframework.web.client.HttpClientErrorException
 
 management:
   endpoints:
@@ -71,18 +85,6 @@ management:
   health:
     circuitbreakers:
       enabled: true # 서킷 브레이커 상태도 health에 포함
-
-retry:
-  instances:
-    toss-payments-retry: # 재시도 설정 이름
-      maxRetryAttempts: 2        # 최대 2번까지 시도 (최초 1회 + 재시도 1회)
-      waitDuration: 200ms        # 재시도 사이의 간격 (0.2초)
-      retryExceptions:           # 재시도할 예외 타입 (모든 에러를 다 재시도하진 않음)
-        - java.io.IOException    # 네트워크 연결 오류
-        - org.springframework.web.client.ResourceAccessException # 타임아웃 등
-        - java.net.ConnectException
-      ignoreExceptions:
-        - org.springframework.web.client.HttpClientErrorException
 
 payments:
   toss:

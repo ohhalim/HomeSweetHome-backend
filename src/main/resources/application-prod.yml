@@ -79,7 +79,7 @@ jwt:
 
 payments:
   toss:
-    secretKey: ${TOSS_PAYMENTS_SECRET_KEY}
+    secretKey: ${TOSS_PAYMENTS_SECRET_KEY:${TOSS_SECRET_KEY:}}
 
 management:
   endpoints:

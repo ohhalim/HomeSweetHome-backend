@@ -68,6 +68,22 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorResponse);
     }
 
+    @ExceptionHandler(TossApiClientException.class)
+    public ResponseEntity<String> handleTossApiClientException(TossApiClientException e) {
+        log.warn("PG 요청 오류 발생: {}", e.getMessage());
+        return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(e.getMessage());
+    }
+
+    @ExceptionHandler(TossApiAuthenticationException.class)
+    public ResponseEntity<String> handleTossApiAuthenticationException(TossApiAuthenticationException e) {
+        log.error("PG 인증 오류 발생: {}", e.getMessage());
+        return ResponseEntity
+                .status(HttpStatus.BAD_GATEWAY)
+                .body(e.getMessage());
+    }
+
     // Toss API 예외 처리 핸들러
     @ExceptionHandler(TossApiFailedException.class)
     public ResponseEntity<String> handleTossApiFailedException(TossApiFailedException e) {
