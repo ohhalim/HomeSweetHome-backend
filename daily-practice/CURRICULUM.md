@@ -88,15 +88,38 @@ Easy 문제로 기본기를 탄탄하게 다지기
 
 ---
 
+---
+
+## [NEW] Implementation Mastery Roadmap (취업 집중형)
+
+일반 기업 코테 통과를 위한 핵심 3단계 전략입니다.
+
+### Phase 1: Fluent HashMap & String (2주)
+- **목표**: 문제를 보자마자 `dict`와 `set`을 10초 안에 선언하고 사용할 수 있는 수준.
+- **핵심**: Two Sum, Valid Anagram, Group Anagrams
+- **훈련**: 리트코드 Easy 20문제 + Medium 5문제
+
+### Phase 2: Simulation & Greedy (2주)
+- **목표**: 긴 지문의 요구사항을 빠짐없이 코드로 옮기는 능력 (현업 코테 1-2번 유형).
+- **핵심**: 상하좌우 이동(DX/DY), 행렬(Matrix) 조작, 시간/날짜 계산.
+- **훈련**: 프로그래머스 Level 2 (구현/그리디 태그)
+
+### Phase 3: BFS/DFS (2주)
+- **목표**: 그래프 탐색 템플릿을 외워서 10분 안에 구현하는 수준.
+- **핵심**: 연결 성분 개수, 최단 거리 기초, 모든 경로 탐색.
+- **훈련**: 프로그래머스 Level 2-3 (DFS/BFS 태그)
+
+---
+
 ## 진행 현황
 
+- [x] Python Basics 1-8 완료
 - [x] Two Sum (1/24)
 - [x] Valid Palindrome (1/26)
 - [x] Valid Anagram (1/26)  
 - [ ] Contains Duplicate ← 현재 진행 중
 
----
-
 ## 다음 단계
 
-Easy 20문제 완료 후 → Medium 도전!
+1. `live-02-hashmap-set.py` 완수 (지금 바로 시작!)
+2. 프로그래머스 Level 1 '해시' 문제 전수 풀이 (5문제 가량)

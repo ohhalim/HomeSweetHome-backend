@@ -5,6 +5,7 @@ import { Counter, Trend } from "k6/metrics";
 // 커스텀 메트릭
 const orderCreationErrors = new Counter('order_creation_errors');
 const orderCreationDuration = new Trend('order_creation_duration');
+const BASE_URL = __ENV.BASE_URL || "http://localhost:8080";
 
 export const options = {
     stages: [
@@ -52,7 +53,7 @@ export default function () {
 
     const startTime = Date.now();
     const orderRes = http.post(
-        'http://localhost:8080/api/v1/orders',
+        `${BASE_URL}/api/v1/orders`,
         orderPayload,
         { headers: headers, tags: { name: 'CreateOrder' } }
     );
@@ -90,7 +91,7 @@ export default function () {
 
 export function setup() {
     console.log('🚀 주문 생성 부하 테스트 시작');
-    console.log(`📊 타겟: localhost:8080`);
+    console.log(`📊 타겟: ${BASE_URL}`);
     console.log(`👥 테스트 사용자: ${testUsers.length}명`);
     console.log(`📦 테스트 상품: ${testSkus.length}개`);
     console.log('');

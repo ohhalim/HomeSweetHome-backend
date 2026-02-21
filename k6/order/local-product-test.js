@@ -3,6 +3,7 @@ import { check, sleep } from "k6";
 import { Counter } from "k6/metrics";
 
 export const errors = new Counter("errors");
+const BASE_URL = __ENV.BASE_URL || "http://localhost:8080";
 
 export const options = {
     stages: [
@@ -18,7 +19,7 @@ export const options = {
 };
 
 export default function () {
-    const url = "http://localhost:8080/api/v1/products/previews?limit=12&sortType=LATEST";
+    const url = `${BASE_URL}/api/v1/products/previews?limit=12&sortType=LATEST`;
 
     const response = http.get(url);
 
