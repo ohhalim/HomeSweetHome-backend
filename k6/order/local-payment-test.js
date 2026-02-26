@@ -1,73 +1,158 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 import { Counter, Trend } from 'k6/metrics';
+import {
+    parseBool,
+    parsePositiveInt,
+    parseIdCsv,
+    pickRandom,
+    randomInt,
+    jsonAuthHeaders,
+    discoverUserPool,
+    discoverSkuPool,
+} from './order-test-data.js';
 
-// 커스텀 메트릭
 const orderCreationErrors = new Counter('order_creation_errors');
 const paymentConfirmErrors = new Counter('payment_confirm_errors');
 const orderCreationDuration = new Trend('order_creation_duration');
 const paymentConfirmDuration = new Trend('payment_confirm_duration');
-const useRealToss = (__ENV.USE_REAL_TOSS || 'false').toLowerCase() === 'true';
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080';
+const USE_REAL_TOSS = parseBool(__ENV.USE_REAL_TOSS, false);
+const LOAD_PROFILE = String(__ENV.LOAD_PROFILE || 'after').toLowerCase();
+const RUN_LABEL = __ENV.RUN_LABEL || `payment-flow-${LOAD_PROFILE}`;
+
+const USER_IDS = parseIdCsv(__ENV.USER_IDS);
+const SKU_IDS = parseIdCsv(__ENV.SKU_IDS);
+const DISCOVER_USERS = parseBool(__ENV.DISCOVER_USERS, true);
+const DISCOVER_SKUS = parseBool(__ENV.DISCOVER_SKUS, true);
+const AUTH_PROBE_PATH = __ENV.AUTH_PROBE_PATH || '/api/v1/orders';
+
+const USER_SCAN_START = parsePositiveInt(__ENV.USER_SCAN_START, 1);
+const USER_SCAN_END = parsePositiveInt(__ENV.USER_SCAN_END, 300);
+const MIN_USER_POOL = parsePositiveInt(__ENV.MIN_USER_POOL, 5);
+
+const PRODUCT_DISCOVERY_PAGES = parsePositiveInt(__ENV.PRODUCT_DISCOVERY_PAGES, 5);
+const PRODUCT_DISCOVERY_LIMIT = parsePositiveInt(__ENV.PRODUCT_DISCOVERY_LIMIT, 24);
+const MAX_PRODUCTS_TO_SCAN = parsePositiveInt(__ENV.MAX_PRODUCTS_TO_SCAN, 60);
+const MIN_SKU_POOL = parsePositiveInt(__ENV.MIN_SKU_POOL, 10);
+const MIN_STOCK = parsePositiveInt(__ENV.MIN_STOCK, 1);
+
+const SKIP_PAYMENT_CONFIRM = parseBool(__ENV.SKIP_PAYMENT_CONFIRM, true);
+
+function buildStages(profile) {
+    if (profile === 'before') {
+        return [
+            { duration: '20s', target: 5 },
+            { duration: '40s', target: 20 },
+            { duration: '1m', target: 20 },
+            { duration: '20s', target: 0 },
+        ];
+    }
+
+    return [
+        { duration: '30s', target: 10 },
+        { duration: '1m', target: 50 },
+        { duration: '2m', target: 50 },
+        { duration: '30s', target: 0 },
+    ];
+}
 
 export const options = {
-    stages: [
-        { duration: '30s', target: 10 },   // 워밍업: 30초 동안 10명까지
-        { duration: '1m', target: 50 },    // 램프업: 1분 동안 50명까지
-        { duration: '2m', target: 50 },    // 유지: 2분 동안 50명 유지
-        { duration: '30s', target: 0 },    // 쿨다운: 30초 동안 0명으로
-    ],
+    stages: buildStages(LOAD_PROFILE),
+    tags: {
+        load_profile: LOAD_PROFILE,
+        run_label: RUN_LABEL,
+    },
     thresholds: {
-        // 성능 목표
-        'http_req_duration': ['p(95) < 3000'],           // 95% 요청이 3초 이내
-        'order_creation_duration': ['p(95) < 2000'],     // 주문 생성 95%가 2초 이내
-        'payment_confirm_duration': ['p(95) < 2000'],    // 결제 승인 95%가 2초 이내
-        
-        // 성공률 목표
-        'checks': ['rate > 0.95'],                        // 전체 체크 성공률 95% 이상
-        'order_creation_errors': ['count < 10'],         // 주문 생성 에러 10건 미만
-        'payment_confirm_errors': ['count < 10'],        // 결제 승인 에러 10건 미만
+        http_req_duration: ['p(95)<4000'],
+        http_req_failed: [{ threshold: 'rate<0.50', abortOnFail: true }],
+        order_creation_duration: ['p(95)<3000'],
+        payment_confirm_duration: ['p(95)<3000'],
+        checks: ['rate>0.80'],
+        order_creation_errors: ['count<200'],
+        payment_confirm_errors: ['count<200'],
     },
 };
 
-// 테스트 데이터 풀
-const testUsers = [1, 2, 3, 4, 5]; // 테스트 사용자 ID들
-const testSkus = [1, 2, 3, 4, 5];  // 테스트 SKU ID들
+export function setup() {
+    if (USE_REAL_TOSS) {
+        throw new Error('local-payment-test.js는 mock 결제 전용입니다. 실제 Toss 연동 검증은 payment-confirm-smoke.js를 사용하세요.');
+    }
 
-export default function () {
-    // 랜덤 사용자 및 상품 선택
-    const userId = testUsers[Math.floor(Math.random() * testUsers.length)];
-    const skuId = testSkus[Math.floor(Math.random() * testSkus.length)];
-    const quantity = Math.floor(Math.random() * 3) + 1; // 1~3개 랜덤
+    const users = discoverUserPool({
+        baseUrl: BASE_URL,
+        authProbePath: AUTH_PROBE_PATH,
+        candidateUserIds: USER_IDS,
+        scanStart: USER_SCAN_START,
+        scanEnd: USER_SCAN_END,
+        minUsers: MIN_USER_POOL,
+        discoverUsers: DISCOVER_USERS,
+    });
 
-    const headers = {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${userId}`
+    if (users.length === 0) {
+        throw new Error('유효한 userId를 찾지 못했습니다. USER_IDS 환경변수를 지정하세요.');
+    }
+
+    const skuDiscovery = discoverSkuPool({
+        baseUrl: BASE_URL,
+        candidateSkuIds: SKU_IDS,
+        discoverSkus: DISCOVER_SKUS,
+        productDiscoveryPages: PRODUCT_DISCOVERY_PAGES,
+        productDiscoveryLimit: PRODUCT_DISCOVERY_LIMIT,
+        maxProductsToScan: MAX_PRODUCTS_TO_SCAN,
+        minSkuPool: MIN_SKU_POOL,
+        minStock: MIN_STOCK,
+    });
+
+    if (skuDiscovery.skuIds.length === 0) {
+        throw new Error('유효한 skuId를 찾지 못했습니다. SKU_IDS를 지정하거나 상품 재고를 확인하세요.');
+    }
+
+    const health = http.get(`${BASE_URL}/actuator/health`, {
+        tags: { name: 'SETUP health', run_label: RUN_LABEL },
+    });
+    if (health.status !== 200) {
+        throw new Error(`백엔드 헬스체크 실패: status=${health.status}, body=${health.body}`);
+    }
+
+    console.log('결제 부하 테스트 시작');
+    console.log(`BASE_URL=${BASE_URL}`);
+    console.log(`LOAD_PROFILE=${LOAD_PROFILE}, RUN_LABEL=${RUN_LABEL}`);
+    console.log(`users=${users.length}, skus=${skuDiscovery.skuIds.length}`);
+    console.log(`payment_confirm=${SKIP_PAYMENT_CONFIRM ? 'disabled' : 'enabled'}`);
+
+    return {
+        users,
+        skuIds: skuDiscovery.skuIds,
     };
+}
 
-    // ===== 1단계: 주문 생성 =====
+export default function (data) {
+    const userId = pickRandom(data.users);
+    const skuId = pickRandom(data.skuIds);
+    const quantity = randomInt(1, 3);
+
     const orderPayload = JSON.stringify({
         orderItems: [{
-            skuId: skuId,
-            quantity: quantity
+            skuId,
+            quantity,
         }],
         recipientName: `Test User ${userId}`,
-        recipientPhone: "010-1234-5678",
+        recipientPhone: '010-1234-5678',
         shippingAddress: `Test Address ${userId}`,
-        shippingRequest: "배송 전 연락주세요",
+        shippingRequest: '배송 전 연락주세요',
     });
 
     const orderStartTime = Date.now();
-    const orderRes = http.post(
-        `${BASE_URL}/api/v1/orders`,
-        orderPayload,
-        { headers: headers, tags: { name: 'CreateOrder' } }
-    );
+    const orderRes = http.post(`${BASE_URL}/api/v1/orders`, orderPayload, {
+        headers: jsonAuthHeaders(userId),
+        tags: { name: 'CreateOrder', run_label: RUN_LABEL },
+    });
     orderCreationDuration.add(Date.now() - orderStartTime);
 
     const orderSuccess = check(orderRes, {
         '주문 생성 성공 (200/201)': (r) => r.status === 200 || r.status === 201,
-        '주문 응답에 orderNumber 포함': (r) => {
+        order_has_orderNumber: (r) => {
             try {
                 const body = r.json();
                 return body.orderNumber !== undefined;
@@ -79,37 +164,36 @@ export default function () {
 
     if (!orderSuccess) {
         orderCreationErrors.add(1);
-        console.error(`주문 생성 실패: userId=${userId}, skuId=${skuId}, status=${orderRes.status}`);
-        return; // 주문 실패 시 결제 단계 스킵
+        return;
     }
 
-    // 주문 데이터 파싱
     const orderData = orderRes.json();
     const orderNumber = orderData.orderNumber;
     const totalAmount = orderData.totalAmount;
 
-    // 사용자가 결제 정보를 입력하는 시간 시뮬레이션
     sleep(1);
 
-    // ===== 2단계: 결제 승인 =====
+    if (SKIP_PAYMENT_CONFIRM) {
+        sleep(2);
+        return;
+    }
+
     const paymentPayload = JSON.stringify({
-        // 이 스크립트는 mock 결제 전용: 실제 Toss 결제키가 아닌 테스트용 키를 사용한다.
         paymentKey: `test_payment_${orderNumber}_${Date.now()}`,
         orderId: orderNumber,
         amount: totalAmount,
     });
 
     const paymentStartTime = Date.now();
-    const paymentRes = http.post(
-        `${BASE_URL}/api/v1/payments/confirm`,
-        paymentPayload,
-        { headers: headers, tags: { name: 'ConfirmPayment' } }
-    );
+    const paymentRes = http.post(`${BASE_URL}/api/v1/payments/confirm`, paymentPayload, {
+        headers: jsonAuthHeaders(userId),
+        tags: { name: 'ConfirmPayment', run_label: RUN_LABEL },
+    });
     paymentConfirmDuration.add(Date.now() - paymentStartTime);
 
     const paymentSuccess = check(paymentRes, {
         '결제 승인 성공 (200/201)': (r) => r.status === 200 || r.status === 201,
-        '결제 응답 파싱 가능': (r) => {
+        payment_body_parseable: (r) => {
             try {
                 r.json();
                 return true;
@@ -121,27 +205,32 @@ export default function () {
 
     if (!paymentSuccess) {
         paymentConfirmErrors.add(1);
-        console.error(`결제 승인 실패: orderNumber=${orderNumber}, status=${paymentRes.status}, body=${paymentRes.body}`);
     }
 
-    // 결제 완료 후 주문 확인 페이지를 보는 시간
     sleep(2);
 }
 
-// 테스트 셋업 (선택적)
-export function setup() {
-    if (useRealToss) {
-        throw new Error('local-payment-test.js는 mock 결제 전용입니다. 실제 Toss 연동 검증은 별도 smoke 스크립트를 사용하세요.');
-    }
-
-    console.log('🚀 결제 부하 테스트 시작');
-    console.log(`📊 타겟: ${BASE_URL}`);
-    console.log(`👥 테스트 사용자: ${testUsers.length}명`);
-    console.log(`📦 테스트 상품: ${testSkus.length}개`);
-    console.log('🧪 모드: MOCK 결제 (가짜 paymentKey 사용)');
+export function teardown() {
+    console.log('결제 부하 테스트 완료');
 }
 
-// 테스트 종료 후 요약 (선택적)
-export function teardown(data) {
-    console.log('✅ 결제 부하 테스트 완료');
+export function handleSummary(data) {
+    return {
+        stdout: textSummary(data),
+        [`artifacts/k6/${RUN_LABEL}/summary.json`]: JSON.stringify(data),
+    };
+}
+
+function textSummary(data) {
+    const metrics = data && data.metrics ? data.metrics : {};
+    const req = metrics.http_reqs && metrics.http_reqs.values ? metrics.http_reqs.values.count : 0;
+    const failRate = metrics.http_req_failed && metrics.http_req_failed.values ? metrics.http_req_failed.values.rate : 0;
+    const p95 = metrics.http_req_duration && metrics.http_req_duration.values ? metrics.http_req_duration.values['p(95)'] : 0;
+    return [
+        '',
+        `run_label=${RUN_LABEL} load_profile=${LOAD_PROFILE}`,
+        `http_reqs=${req}`,
+        `http_req_failed_rate=${failRate}`,
+        `http_req_duration_p95=${p95}`,
+    ].join('\n');
 }

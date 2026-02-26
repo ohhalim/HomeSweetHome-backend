@@ -73,13 +73,10 @@ https://www.youtube.com/watch?v=tDZQVn2-uPs
 - 결제 실패 케이스에서 복구 가능성 확보
 
 개선 전  
-![결제 1차 개선 전](docs/assets/readme/payment-1-before.svg)
+![결제 1차 개선 전](docs/assets/readme/payment-1-before.png)
 
 개선 후  
-![결제 1차 개선 후](docs/assets/readme/payment-1-after.svg)
-
-개선 전/후 비교  
-![결제 1차 개선 비교](docs/assets/readme/payment-1-compare.svg)
+![결제 1차 개선 후](docs/assets/readme/payment-1-after.png)
 
 ---
 
@@ -103,13 +100,11 @@ https://www.youtube.com/watch?v=tDZQVn2-uPs
 - 결제 장애 분석 속도와 운영 안정성 향상
 
 개선 전  
-![결제 2차 개선 전](docs/assets/readme/payment-2-before.svg)
+![결제 2차 개선 전](docs/assets/readme/payment-2-before.png)
 
 개선 후  
-![결제 2차 개선 후](docs/assets/readme/payment-2-after.svg)
+![결제 2차 개선 후](docs/assets/readme/payment-2-after.png)
 
-개선 전/후 비교  
-![결제 2차 개선 비교](docs/assets/readme/payment-2-compare.svg)
 
 ---
 
@@ -135,13 +130,10 @@ https://www.youtube.com/watch?v=tDZQVn2-uPs
 - 카운터 갱신 안정성 확보
 
 개선 전  
-![커뮤니티 1차 개선 전](docs/assets/readme/community-1-before.svg)
+![커뮤니티 1차 개선 전](docs/assets/readme/community-1-before.png)
 
 개선 후  
-![커뮤니티 1차 개선 후](docs/assets/readme/community-1-after.svg)
-
-개선 전/후 비교  
-![커뮤니티 1차 개선 비교](docs/assets/readme/community-1-compare.svg)
+![커뮤니티 1차 개선 후](docs/assets/readme/community-1-after.png)
 
 ---
 
@@ -172,9 +164,6 @@ https://www.youtube.com/watch?v=tDZQVn2-uPs
 개선 후  
 ![커뮤니티 2차 개선 후](docs/assets/readme/community-2-after.svg)
 
-개선 전/후 비교  
-![커뮤니티 2차 개선 비교](docs/assets/readme/community-2-compare.svg)
-
 ---
 
 ### 5️⃣ 커뮤니티 3차 성능 개선 - DB 쿼리 최적화 및 캐싱 전략
@@ -199,13 +188,11 @@ https://www.youtube.com/watch?v=tDZQVn2-uPs
 - DB 조회 부하 감소
 
 개선 전  
-![커뮤니티 3차 개선 전](docs/assets/readme/community-3-before.svg)
+![커뮤니티 3차 개선 전](docs/assets/readme/community-3-before.png)
 
 개선 후  
-![커뮤니티 3차 개선 후](docs/assets/readme/community-3-after.svg)
+![커뮤니티 3차 개선 후](docs/assets/readme/community-3-after.png)
 
-개선 전/후 비교  
-![커뮤니티 3차 개선 비교](docs/assets/readme/community-3-compare.svg)
 
 ---
 
@@ -229,9 +216,6 @@ https://www.youtube.com/watch?v=tDZQVn2-uPs
 - 병목 구간을 단계적으로 분리해 해결
 - 서비스 특성에 맞는 현실적인 트레이드오프 의사결정 경험 축적
 
-트레이드오프 분석 요약  
-![카운터 트레이드오프](docs/assets/readme/troubleshooting-counter.svg)
-
 ### 2️⃣ 외부 결제 API 호출 제약 → Mock 기반 테스트 환경 구성
 
 #### 문제 상황
@@ -251,8 +235,6 @@ https://www.youtube.com/watch?v=tDZQVn2-uPs
 - 외부 API 제약 없이 병목 구간 분석 가능
 - 회귀 테스트 안정성 향상
 
-테스트 환경 구성 요약  
-![Mock 결제 테스트 환경](docs/assets/readme/troubleshooting-mock.svg)
 
 ---
 
@@ -269,9 +251,10 @@ https://www.youtube.com/watch?v=tDZQVn2-uPs
 
 ### 🗒️ 2. 기타 (Notes / Additional Info)
 
-- 부하 테스트 결과 분석
-- 모니터링/운영 가이드
-- Mock 결제 서비스 사용 가이드
+- CS스터디 스레드와 프로세스에 대하여
+- CS스터디 Redis
+- 글로벌 batchsize 미팅 제안서
+
 
 - Wiki로 이동하기: [HomeSweetHome Wiki](https://github.com/ohhalim/HomeSweetHome-backend/wiki)
 
