@@ -72,12 +72,6 @@ https://www.youtube.com/watch?v=tDZQVn2-uPs
 - 외부 결제 상태와 내부 주문 상태 정합성 강화
 - 결제 실패 케이스에서 복구 가능성 확보
 
-개선 전  
-![결제 1차 개선 전](docs/assets/readme/payment-1-before.png)
-
-개선 후  
-![결제 1차 개선 후](docs/assets/readme/payment-1-after.png)
-
 ---
 
 ### 2️⃣ 결제 시스템 2차 개선 - 외부 PG 장애 대응 및 테스트 환경 개선
@@ -98,12 +92,6 @@ https://www.youtube.com/watch?v=tDZQVn2-uPs
 - 장애 유형별 대응 전략(재시도/즉시 실패/관측) 적용 가능
 - 테스트 환경에서 결제 플로우 반복 검증 가능
 - 결제 장애 분석 속도와 운영 안정성 향상
-
-개선 전  
-![결제 2차 개선 전](docs/assets/readme/payment-2-before.png)
-
-개선 후  
-![결제 2차 개선 후](docs/assets/readme/payment-2-after.png)
 
 
 ---
@@ -158,12 +146,6 @@ https://www.youtube.com/watch?v=tDZQVn2-uPs
 - 고빈도 카운터 연산의 처리 지연 감소
 - 정합성/동시성/성능 균형을 갖춘 구조로 전환
 
-개선 전  
-![커뮤니티 2차 개선 전](docs/assets/readme/community-2-before.svg)
-
-개선 후  
-![커뮤니티 2차 개선 후](docs/assets/readme/community-2-after.svg)
-
 ---
 
 ### 5️⃣ 커뮤니티 3차 성능 개선 - DB 쿼리 최적화 및 캐싱 전략
@@ -186,13 +168,6 @@ https://www.youtube.com/watch?v=tDZQVn2-uPs
 - Redis 호출 수 개선 : **30회/요청 → 3회/요청**
 - 목록 조회 p95 개선
 - DB 조회 부하 감소
-
-개선 전  
-![커뮤니티 3차 개선 전](docs/assets/readme/community-3-before.png)
-
-개선 후  
-![커뮤니티 3차 개선 후](docs/assets/readme/community-3-after.png)
-
 
 ---
 
@@ -234,7 +209,6 @@ https://www.youtube.com/watch?v=tDZQVn2-uPs
 - 결제 시나리오의 반복 검증 가능
 - 외부 API 제약 없이 병목 구간 분석 가능
 - 회귀 테스트 안정성 향상
-
 
 ---
 
