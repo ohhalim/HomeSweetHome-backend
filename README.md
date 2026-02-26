@@ -212,27 +212,28 @@ https://www.youtube.com/watch?v=tDZQVn2-uPs
 
 #### 문제 상황
 
-외부 서버에 1만 명 부하 테스트 중 요청의 80% 이상이 실패
-로컬에서는 문제 없음 → 외부 서버에서만 연결 유실 발생
-Spring Actuator 활용한 분석 결과:
-서버가 요청 자체를 수신하지 못함
-Tomcat의 accept() 호출 이전, OS 레벨 TCP Backlog Queue가 포화 상태
+- 외부 서버에 1만 명 부하 테스트 중 요청의 80% 이상이 실패
+- 로컬에서는 문제 없음 → 외부 서버에서만 연결 유실 발생
+- Spring Actuator 활용한 분석 결과:
+    - 서버가 요청 자체를 수신하지 못함
+    - Tomcat의 accept() 호출 이전, OS 레벨 TCP Backlog Queue가 포화 상태
 
 #### 원인 상세 분석
 
-Tomcat은 클라이언트 요청을 OS의 TCP 대기열(backlog)에 저장한 뒤 accept()를 통해 수락
-이 때 accept-count 값이 낮으면 수락 대기열 공간이 부족해 연결 누락 발생
-또한, OS의 somaxconn 값이 제한되어 있으면 Tomcat accept-count설정도 무의미해짐
+- Tomcat은 클라이언트 요청을 OS의 TCP 대기열(backlog)에 저장한 뒤 accept()를 통해 수락
+- 이 때 accept-count 값이 낮으면 수락 대기열 공간이 부족해 연결 누락 발생
+- 또한, OS의 somaxconn 값이 제한되어 있으면 Tomcat accept-count설정도 무의미해짐
 
 #### 해결 방법
 
-Tomcat 설정 조정: accept-count를 10000으로 확장
-OS 튜닝: somaxconn 값을 10000으로 변경 → sysctl -w net.core.somaxconn=10000
+- Tomcat 설정 조정: accept-count를 10000으로 확장
+- OS 튜닝: somaxconn 값을 10000으로 변경 → sysctl -w net.core.somaxconn=10000
 
 #### 결과 및 인사이트
 
-외부 부하 테스트에서 1만 개 요청 정상 수신
-TCP Backlog와 Tomcat accept-count 관계를 실전 환경에서 명확히 이해하고 적용
+- 외부 부하 테스트에서 1만 개 요청 정상 수신
+- TCP Backlog와 Tomcat accept-count 관계를 실전 환경에서 명확히 이해하고 적용
+
 ---
 
 ## 📖 Wiki 및 참고 자료
