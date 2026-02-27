@@ -1,6 +1,7 @@
 package com.homesweet.homesweetback.domain.order.service;
 
 import com.homesweet.homesweetback.common.exception.OrderNotFoundException;
+import com.homesweet.homesweetback.common.exception.StockInsufficientException;
 import com.homesweet.homesweetback.domain.auth.entity.User;
 import com.homesweet.homesweetback.domain.auth.repository.UserRepository;
 import com.homesweet.homesweetback.domain.order.dto.CreateOrderRequest;
@@ -18,11 +19,12 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
-import java.util.LinkedHashMap;
 
 /**
  * 주문 서비스 구현체
@@ -97,6 +99,27 @@ public class OrderServiceImpl implements OrderService {
             totalAmount += unitPrice * entry.getValue();
         }
 
+        // 재고 차감 (DB 원자적 UPDATE)
+        List<Map.Entry<Long, Integer>> deductedEntries = new ArrayList<>();
+        try {
+            for (Map.Entry<Long, Integer> entry : skuQuantitiesById.entrySet()) {
+                Long skuId = entry.getKey();
+                int quantity = entry.getValue();
+                int updatedRows = skuJPARepository.decreaseStock(skuId, (long) quantity);
+                if (updatedRows == 0) {
+                    throw new StockInsufficientException(
+                            "재고가 부족합니다. (SKU: " + skuId + ", 요청 수량: " + quantity + ")");
+                }
+                deductedEntries.add(entry);
+            }
+        } catch (StockInsufficientException e) {
+            // 일부만 차감 성공한 경우 복원
+            for (Map.Entry<Long, Integer> deducted : deductedEntries) {
+                skuJPARepository.increaseStock(deducted.getKey(), (long) deducted.getValue());
+            }
+            throw e;
+        }
+
         // 주문 생성
         String orderNumber = generateOrderNumber();
         Order order = Order.builder()
@@ -163,11 +186,12 @@ public class OrderServiceImpl implements OrderService {
 
     /**
      * 주문 취소 (결제 전 PENDING 상태에서만 가능)
+     * 취소 시 차감된 재고를 복원합니다.
      */
     @Override
     @Transactional
     public void cancelOrder(Long orderId, Long userId) {
-        Order order = orderRepository.findById(orderId)
+        Order order = orderRepository.findByIdWithItems(orderId)
                 .orElseThrow(() -> new OrderNotFoundException("주문을 찾을 수 없습니다. orderId=" + orderId));
 
         if (!order.isOwner(userId)) {
@@ -178,8 +202,21 @@ public class OrderServiceImpl implements OrderService {
             throw new IllegalStateException("결제 대기 상태의 주문만 취소할 수 있습니다.");
         }
 
+        // 재고 복원
+        restoreStock(order);
+
         order.cancel();
         log.info("주문 취소 완료: orderId={}", orderId);
+    }
+
+    /**
+     * 주문 항목의 재고를 복원합니다.
+     */
+    private void restoreStock(Order order) {
+        for (OrderItem item : order.getOrderItems()) {
+            skuJPARepository.increaseStock(item.getSku().getId(), item.getQuantity());
+            log.info("재고 복원: skuId={}, quantity={}", item.getSku().getId(), item.getQuantity());
+        }
     }
 
     /**

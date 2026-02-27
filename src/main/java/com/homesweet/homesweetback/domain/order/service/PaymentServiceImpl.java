@@ -3,8 +3,10 @@ package com.homesweet.homesweetback.domain.order.service;
 import com.homesweet.homesweetback.domain.order.dto.PaymentResponse;
 import com.homesweet.homesweetback.domain.order.dto.TossPaymentCancelRequest;
 import com.homesweet.homesweetback.domain.order.dto.TossPaymentConfirmRequest;
+import com.homesweet.homesweetback.domain.order.entity.OrderItem;
 import com.homesweet.homesweetback.domain.order.entity.Payment;
 import com.homesweet.homesweetback.domain.order.repository.PaymentRepository;
+import com.homesweet.homesweetback.domain.product.product.command.repository.jpa.SkuJPARepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -29,6 +31,7 @@ public class PaymentServiceImpl implements PaymentService {
     private final PaymentRepository paymentRepository;
     private final PaymentTransactionalService paymentTransactionalService;
     private final PaymentRedisGuardService paymentRedisGuardService;
+    private final SkuJPARepository skuJPARepository;
 
     @Override
     public PaymentResponse confirmPayment(Long userId, TossPaymentConfirmRequest request) {
@@ -103,6 +106,13 @@ public class PaymentServiceImpl implements PaymentService {
         } else {
             payment.cancel();
             payment.getOrder().cancel();
+
+            // 전체 취소 시 재고 복원
+            for (OrderItem item : payment.getOrder().getOrderItems()) {
+                skuJPARepository.increaseStock(item.getSku().getId(), item.getQuantity());
+                log.info("결제 취소 재고 복원: skuId={}, quantity={}",
+                        item.getSku().getId(), item.getQuantity());
+            }
         }
 
         paymentRepository.save(payment);
