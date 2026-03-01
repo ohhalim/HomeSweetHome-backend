@@ -106,3 +106,14 @@ community:
     warmup-delay: 3600000       # 캐시 워밍업 주기 (ms)
   redis:
     ttl: 7d             # Redis 카운터 TTL
+
+order:
+  scheduler:
+    pending-expire-after-minutes: 15
+    pending-expire-delay-ms: 60000
+    pending-expire-initial-delay-ms: 30000
+    pending-expire-batch-size: 100
+    pending-expire-max-batches: 5
+    cancel-reconcile-delay-ms: 60000
+    cancel-reconcile-initial-delay-ms: 45000
+    cancel-reconcile-batch-size: 50

@@ -8,6 +8,8 @@ public enum PaymentStatus {
     IN_PROGRESS, // 결제 진행 중
     WAITING_FOR_DEPOSIT, // 가상계좌 입금 대기
     DONE, // 결제 완료
+    CANCEL_REQUESTED, // 취소 요청됨 (외부 PG/내부 DB 정합성 보강용)
+    CANCEL_FAILED, // 취소 처리 실패 (재시도 대상)
     CANCELLED, // 결제 취소
     PARTIAL_CANCELED, // 부분 취소
     ABORTED, // 결제 승인 실패

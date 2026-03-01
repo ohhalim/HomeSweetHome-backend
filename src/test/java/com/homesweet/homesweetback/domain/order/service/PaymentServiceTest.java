@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -63,6 +64,9 @@ class PaymentServiceTest {
 
     @Mock
     private PaymentTransactionalService paymentTransactionalService;
+
+    @Mock
+    private PaymentCancellationTransactionalService paymentCancellationTransactionalService;
 
     @Mock
     private PaymentRedisGuardService paymentRedisGuardService;
@@ -260,21 +264,20 @@ class PaymentServiceTest {
             Long userId = 1L;
             String paymentKey = "test_payment_key_123";
 
-            User user = createTestUser(userId);
-            Order order = createTestOrder(1L, user, "TEST-ORDER-001", 100000L);
-            Payment payment = createTestPayment(1L, order, paymentKey);
-
             TossPaymentCancelRequest request = new TossPaymentCancelRequest("고객 요청", null);
+            PaymentResponse expected = PaymentResponse.builder().paymentId(1L).paymentKey(paymentKey).build();
 
-            given(paymentRepository.findByPaymentKey(paymentKey)).willReturn(Optional.of(payment));
+            given(paymentCancellationTransactionalService.finalizeCancelSuccess(paymentKey, true)).willReturn(expected);
 
             // when
             PaymentResponse response = paymentService.cancelPayment(userId, paymentKey, request);
 
             // then
             assertThat(response).isNotNull();
+            verify(paymentCancellationTransactionalService, times(1)).markCancelRequested(userId, paymentKey);
             verify(tossPaymentsService, times(1)).cancelPayment(paymentKey, request);
-            verify(paymentRepository, times(1)).save(payment);
+            verify(paymentCancellationTransactionalService, times(1)).finalizeCancelSuccess(paymentKey, true);
+            verify(paymentCancellationTransactionalService, never()).markCancelFailed(anyString());
         }
 
         @Test
@@ -282,26 +285,19 @@ class PaymentServiceTest {
         void cancelPayment_Fail_NotOwner() {
             // given
             Long userId = 1L;
-            Long otherUserId = 2L;
             String paymentKey = "test_payment_key_123";
-
-            User otherUser = createTestUser(otherUserId);
-            Order order = mock(Order.class);
-            given(order.isOwner(userId)).willReturn(false);
-
-            Payment payment = Payment.builder()
-                    .order(order)
-                    .paymentKey(paymentKey)
-                    .build();
 
             TossPaymentCancelRequest request = new TossPaymentCancelRequest("고객 요청", null);
 
-            given(paymentRepository.findByPaymentKey(paymentKey)).willReturn(Optional.of(payment));
+            willThrow(new IllegalArgumentException("본인의 결제만 취소할 수 있습니다."))
+                    .given(paymentCancellationTransactionalService).markCancelRequested(userId, paymentKey);
 
             // when & then
             assertThatThrownBy(() -> paymentService.cancelPayment(userId, paymentKey, request))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("본인의 결제만 취소할 수 있습니다");
+
+            verify(tossPaymentsService, never()).cancelPayment(anyString(), any());
         }
     }
 

@@ -18,17 +18,26 @@ import {
 const browseErrors = new Counter('browse_errors');
 const stockViewErrors = new Counter('stock_view_errors');
 const cartAddErrors = new Counter('cart_add_errors');
+const cartSnapshotErrors = new Counter('cart_snapshot_errors');
+const cartAddFallbackAttempts = new Counter('cart_add_fallback_attempts');
+const cartAddFallbackSuccess = new Counter('cart_add_fallback_success');
 const orderCreateErrors = new Counter('order_create_errors');
 const paymentConfirmErrors = new Counter('payment_confirm_errors');
+const paymentLookupErrors = new Counter('payment_lookup_errors');
+const orderVerifyErrors = new Counter('order_verify_errors');
 
 const browseDuration = new Trend('browse_duration', true);
 const stockViewDuration = new Trend('stock_view_duration', true);
 const cartAddDuration = new Trend('cart_add_duration', true);
 const orderCreateDuration = new Trend('order_create_duration', true);
 const paymentConfirmDuration = new Trend('payment_confirm_duration', true);
+const paymentLookupDuration = new Trend('payment_lookup_duration', true);
+const orderVerifyDuration = new Trend('order_verify_duration', true);
 
 const checkoutSuccessRate = new Rate('checkout_success_rate');
 const orderCreateSuccessRate = new Rate('order_create_success_rate');
+const paymentConfirmSuccessRate = new Rate('payment_confirm_success_rate');
+const paymentVerifySuccessRate = new Rate('payment_verify_success_rate');
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080';
 const USER_IDS = parseIdCsv(__ENV.USER_IDS);
@@ -47,8 +56,14 @@ const PRODUCT_DISCOVERY_LIMIT = parsePositiveInt(__ENV.PRODUCT_DISCOVERY_LIMIT, 
 const MAX_PRODUCTS_TO_SCAN = parsePositiveInt(__ENV.MAX_PRODUCTS_TO_SCAN, 60);
 const MIN_SKU_POOL = parsePositiveInt(__ENV.MIN_SKU_POOL, 10);
 const MIN_STOCK = parseNonNegativeInt(__ENV.MIN_STOCK, 0);
+const SETUP_HEALTH_PATH = __ENV.SETUP_HEALTH_PATH || '/api/v1/products/previews?limit=1&sortType=LATEST';
 
 const ENABLE_PAYMENT_CONFIRM = parseBool(__ENV.ENABLE_PAYMENT_CONFIRM, false);
+const VALIDATE_PAYMENT_AFTER_CONFIRM = parseBool(__ENV.VALIDATE_PAYMENT_AFTER_CONFIRM, true);
+const PAYMENT_VERIFY_ORDER_STATUS = parseBool(__ENV.PAYMENT_VERIFY_ORDER_STATUS, true);
+const CART_TYPE_LIMIT = parsePositiveInt(__ENV.CART_TYPE_LIMIT, 10);
+const CART_FETCH_SIZE = parsePositiveInt(__ENV.CART_FETCH_SIZE, 20);
+const CART_ADD_LIMIT_FALLBACK = parseBool(__ENV.CART_ADD_LIMIT_FALLBACK, true);
 
 const THINK_TIME_MIN = Number(__ENV.THINK_TIME_MIN || '0.2');
 const THINK_TIME_MAX = Number(__ENV.THINK_TIME_MAX || '1.0');
@@ -84,11 +99,14 @@ export const options = {
 };
 
 export function setup() {
-    const health = http.get(`${BASE_URL}/api/v1/products/previews?limit=1&sortType=LATEST`, {
+    const health = http.get(`${BASE_URL}${SETUP_HEALTH_PATH}`, {
         tags: { name: 'SETUP health' },
     });
     if (health.status !== 200) {
-        throw new Error(`상품 API 헬스체크 실패: status=${health.status}, body=${health.body}`);
+        const errorMessage = health.error ? `, error=${health.error}` : '';
+        throw new Error(
+            `상품 API 헬스체크 실패: baseUrl=${BASE_URL}, path=${SETUP_HEALTH_PATH}, status=${health.status}${errorMessage}, body=${health.body}`
+        );
     }
 
     const users = discoverUserPool({
@@ -127,6 +145,11 @@ export function setup() {
     console.log(`BASE_URL=${BASE_URL}`);
     console.log(`users=${users.length}, skus=${skuDiscovery.skuIds.length}, products=${skuDiscovery.productIds.length}`);
     console.log(`ENABLE_PAYMENT_CONFIRM=${ENABLE_PAYMENT_CONFIRM}`);
+    if (ENABLE_PAYMENT_CONFIRM) {
+        console.log(`VALIDATE_PAYMENT_AFTER_CONFIRM=${VALIDATE_PAYMENT_AFTER_CONFIRM}`);
+        console.log(`PAYMENT_VERIFY_ORDER_STATUS=${PAYMENT_VERIFY_ORDER_STATUS}`);
+    }
+    console.log(`CART_ADD_LIMIT_FALLBACK=${CART_ADD_LIMIT_FALLBACK}, CART_TYPE_LIMIT=${CART_TYPE_LIMIT}`);
 
     return {
         users,
@@ -214,20 +237,43 @@ function viewStock(data) {
 }
 
 function addToCart(userId, skuId, quantity) {
+    const start = Date.now();
+
     const payload = JSON.stringify({
         skuId,
         quantity,
     });
 
-    const start = Date.now();
-    const response = http.post(`${BASE_URL}/api/v1/carts`, payload, {
+    let response = http.post(`${BASE_URL}/api/v1/carts`, payload, {
         headers: jsonAuthHeaders(userId),
         tags: { name: 'POST /carts' },
     });
+
+    if (!isSuccessfulStatus(response.status) && CART_ADD_LIMIT_FALLBACK && canRetryCartAdd(response.status)) {
+        const cartItems = getCartItems(userId);
+        if (cartItems.length >= CART_TYPE_LIMIT) {
+            const fallbackItem = pickRandom(cartItems);
+            if (fallbackItem !== null) {
+                cartAddFallbackAttempts.add(1);
+                const fallbackPayload = JSON.stringify({
+                    skuId: fallbackItem.skuId,
+                    quantity,
+                });
+                response = http.post(`${BASE_URL}/api/v1/carts`, fallbackPayload, {
+                    headers: jsonAuthHeaders(userId),
+                    tags: { name: 'POST /carts (fallback)' },
+                });
+                if (isSuccessfulStatus(response.status)) {
+                    cartAddFallbackSuccess.add(1);
+                }
+            }
+        }
+    }
+
     cartAddDuration.add(Date.now() - start);
 
     const ok = check(response, {
-        'cart add status is 200/201': (r) => r.status === 200 || r.status === 201,
+        'cart add status is 200/201': (r) => isSuccessfulStatus(r.status),
     });
 
     if (!ok) {
@@ -252,6 +298,39 @@ function addToCart(userId, skuId, quantity) {
         cartId,
         response,
     };
+}
+
+function canRetryCartAdd(status) {
+    return status === 400 || status === 409;
+}
+
+function isSuccessfulStatus(status) {
+    return status === 200 || status === 201;
+}
+
+function getCartItems(userId) {
+    const response = http.get(`${BASE_URL}/api/v1/carts?size=${CART_FETCH_SIZE}`, {
+        headers: authHeaders(userId),
+        tags: { name: 'GET /carts' },
+    });
+
+    if (response.status !== 200) {
+        cartSnapshotErrors.add(1);
+        return [];
+    }
+
+    const body = parseJsonBody(response);
+    if (body === null || !Array.isArray(body.contents)) {
+        cartSnapshotErrors.add(1);
+        return [];
+    }
+
+    return body.contents
+        .map((item) => ({
+            id: Number(item.id),
+            skuId: Number(item.skuId),
+        }))
+        .filter((item) => Number.isInteger(item.id) && item.id > 0 && Number.isInteger(item.skuId) && item.skuId > 0);
 }
 
 function createOrder(userId, skuId, quantity, cartId) {
@@ -281,11 +360,14 @@ function createOrder(userId, skuId, quantity, cartId) {
     let hasOrderNumber = false;
     let totalAmount = null;
     let orderNumber = null;
+    let orderId = null;
 
     try {
         const body = response.json();
         orderNumber = body.orderNumber;
         totalAmount = body.totalAmount;
+        const parsedOrderId = Number(body.orderId);
+        orderId = Number.isInteger(parsedOrderId) && parsedOrderId > 0 ? parsedOrderId : null;
         hasOrderNumber = !!orderNumber;
     } catch (e) {
         hasOrderNumber = false;
@@ -303,13 +385,73 @@ function createOrder(userId, skuId, quantity, cartId) {
 
     return {
         ok,
+        orderId,
         orderNumber,
         totalAmount,
         response,
     };
 }
 
-function confirmPayment(userId, orderNumber, amount) {
+function parseJsonBody(response) {
+    try {
+        return response.json();
+    } catch (e) {
+        return null;
+    }
+}
+
+function validatePayment(userId, paymentKey, orderNumber, amount, orderId) {
+    const amountNumber = Number(amount);
+
+    const paymentLookupStart = Date.now();
+    const paymentResponse = http.get(`${BASE_URL}/api/v1/payments/${encodeURIComponent(paymentKey)}`, {
+        headers: authHeaders(userId),
+        tags: { name: 'GET /payments/:paymentKey' },
+    });
+    paymentLookupDuration.add(Date.now() - paymentLookupStart);
+
+    const paymentBody = parseJsonBody(paymentResponse);
+    const paymentLookupOk = check(paymentResponse, {
+        'payment lookup status is 200': (r) => r.status === 200,
+        'payment lookup status is DONE': () => paymentBody !== null && paymentBody.status === 'DONE',
+        'payment lookup paymentKey matches': () => paymentBody !== null && paymentBody.paymentKey === paymentKey,
+        'payment lookup orderNumber matches': () => paymentBody !== null && paymentBody.orderNumber === orderNumber,
+        'payment lookup amount matches': () =>
+            paymentBody !== null
+            && Number.isFinite(amountNumber)
+            && Number(paymentBody.amount) === amountNumber,
+    });
+
+    if (!paymentLookupOk) {
+        paymentLookupErrors.add(1);
+    }
+
+    if (!PAYMENT_VERIFY_ORDER_STATUS || !Number.isInteger(orderId) || orderId <= 0) {
+        return paymentLookupOk;
+    }
+
+    const orderVerifyStart = Date.now();
+    const orderResponse = http.get(`${BASE_URL}/api/v1/orders/${orderId}`, {
+        headers: authHeaders(userId),
+        tags: { name: 'GET /orders/:id' },
+    });
+    orderVerifyDuration.add(Date.now() - orderVerifyStart);
+
+    const orderBody = parseJsonBody(orderResponse);
+    const orderVerifyOk = check(orderResponse, {
+        'order verify status is 200': (r) => r.status === 200,
+        'order verify status is PAID': () => orderBody !== null && orderBody.status === 'PAID',
+        'order verify orderNumber matches': () => orderBody !== null && orderBody.orderNumber === orderNumber,
+    });
+
+    if (!orderVerifyOk) {
+        orderVerifyErrors.add(1);
+    }
+
+    return paymentLookupOk && orderVerifyOk;
+}
+
+function confirmPayment(userId, orderId, orderNumber, amount) {
     if (!ENABLE_PAYMENT_CONFIRM) {
         return {
             ok: true,
@@ -317,8 +459,9 @@ function confirmPayment(userId, orderNumber, amount) {
         };
     }
 
+    const requestedPaymentKey = `k6_mock_${orderNumber}_${Date.now()}`;
     const payload = JSON.stringify({
-        paymentKey: `k6_mock_${orderNumber}_${Date.now()}`,
+        paymentKey: requestedPaymentKey,
         orderId: orderNumber,
         amount,
     });
@@ -330,16 +473,44 @@ function confirmPayment(userId, orderNumber, amount) {
     });
     paymentConfirmDuration.add(Date.now() - start);
 
-    const ok = check(response, {
-        'payment confirm status is 200/201': (r) => r.status === 200 || r.status === 201,
-    });
+    const confirmBody = parseJsonBody(response);
+    const responsePaymentKey =
+        confirmBody !== null && typeof confirmBody.paymentKey === 'string'
+            ? confirmBody.paymentKey
+            : requestedPaymentKey;
 
-    if (!ok) {
+    const confirmOk = check(response, {
+        'payment confirm status is 200/201': (r) => r.status === 200 || r.status === 201,
+        'payment confirm has paymentKey': () =>
+            confirmBody !== null && typeof confirmBody.paymentKey === 'string' && confirmBody.paymentKey.length > 0,
+        'payment confirm status is DONE': () => confirmBody !== null && confirmBody.status === 'DONE',
+        'payment confirm orderNumber matches': () => confirmBody !== null && confirmBody.orderNumber === orderNumber,
+        'payment confirm amount matches': () => confirmBody !== null && Number(confirmBody.amount) === Number(amount),
+    });
+    paymentConfirmSuccessRate.add(confirmOk);
+
+    if (!confirmOk) {
+        paymentConfirmErrors.add(1);
+        paymentVerifySuccessRate.add(false);
+        return {
+            ok: false,
+            skipped: false,
+            response,
+        };
+    }
+
+    let verified = true;
+    if (VALIDATE_PAYMENT_AFTER_CONFIRM) {
+        verified = validatePayment(userId, responsePaymentKey, orderNumber, amount, orderId);
+    }
+    paymentVerifySuccessRate.add(verified);
+
+    if (!verified) {
         paymentConfirmErrors.add(1);
     }
 
     return {
-        ok,
+        ok: confirmOk && verified,
         skipped: false,
         response,
     };
@@ -361,7 +532,7 @@ function runCheckout(data, userId) {
         return;
     }
 
-    const payment = confirmPayment(userId, order.orderNumber, order.totalAmount);
+    const payment = confirmPayment(userId, order.orderId, order.orderNumber, order.totalAmount);
     checkoutSuccessRate.add(payment.ok);
 }
 
