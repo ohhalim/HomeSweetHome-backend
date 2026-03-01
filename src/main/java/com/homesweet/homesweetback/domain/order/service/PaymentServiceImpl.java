@@ -3,14 +3,11 @@ package com.homesweet.homesweetback.domain.order.service;
 import com.homesweet.homesweetback.domain.order.dto.PaymentResponse;
 import com.homesweet.homesweetback.domain.order.dto.TossPaymentCancelRequest;
 import com.homesweet.homesweetback.domain.order.dto.TossPaymentConfirmRequest;
-import com.homesweet.homesweetback.domain.order.entity.OrderItem;
 import com.homesweet.homesweetback.domain.order.entity.Payment;
 import com.homesweet.homesweetback.domain.order.repository.PaymentRepository;
-import com.homesweet.homesweetback.domain.product.product.command.repository.jpa.SkuJPARepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Map;
 
@@ -30,8 +27,8 @@ public class PaymentServiceImpl implements PaymentService {
     private final TossPaymentsService tossPaymentsService;
     private final PaymentRepository paymentRepository;
     private final PaymentTransactionalService paymentTransactionalService;
+    private final PaymentCancellationTransactionalService paymentCancellationTransactionalService;
     private final PaymentRedisGuardService paymentRedisGuardService;
-    private final SkuJPARepository skuJPARepository;
 
     @Override
     public PaymentResponse confirmPayment(Long userId, TossPaymentConfirmRequest request) {
@@ -88,37 +85,26 @@ public class PaymentServiceImpl implements PaymentService {
     }
 
     @Override
-    @Transactional
     public PaymentResponse cancelPayment(Long userId, String paymentKey, TossPaymentCancelRequest request) {
         log.info("Payment cancel started. userId={}, paymentKey={}", userId, paymentKey);
 
-        Payment payment = paymentRepository.findByPaymentKey(paymentKey)
-                .orElseThrow(() -> new IllegalArgumentException("결제 정보를 찾을 수 없습니다."));
+        paymentCancellationTransactionalService.markCancelRequested(userId, paymentKey);
 
-        if (!payment.getOrder().isOwner(userId)) {
-            throw new IllegalArgumentException("본인의 결제만 취소할 수 있습니다.");
-        }
-
-        tossPaymentsService.cancelPayment(paymentKey, request);
-
-        if (request.getCancelAmount() != null && request.getCancelAmount() < payment.getAmount()) {
-            payment.partialCancel();
-        } else {
-            payment.cancel();
-            payment.getOrder().cancel();
-
-            // 전체 취소 시 재고 복원
-            for (OrderItem item : payment.getOrder().getOrderItems()) {
-                skuJPARepository.increaseStock(item.getSku().getId(), item.getQuantity());
-                log.info("결제 취소 재고 복원: skuId={}, quantity={}",
-                        item.getSku().getId(), item.getQuantity());
+        try {
+            tossPaymentsService.cancelPayment(paymentKey, request);
+            boolean fullCancel = request.getCancelAmount() == null;
+            if (!fullCancel) {
+                Payment payment = paymentRepository.findByPaymentKey(paymentKey)
+                        .orElseThrow(() -> new IllegalArgumentException("결제 정보를 찾을 수 없습니다."));
+                fullCancel = request.getCancelAmount() >= payment.getAmount();
             }
+            PaymentResponse response = paymentCancellationTransactionalService.finalizeCancelSuccess(paymentKey, fullCancel);
+            log.info("Payment cancel completed. paymentKey={}, fullCancel={}", paymentKey, fullCancel);
+            return response;
+        } catch (Exception e) {
+            paymentCancellationTransactionalService.markCancelFailed(paymentKey);
+            throw e;
         }
-
-        paymentRepository.save(payment);
-        log.info("Payment cancel completed. paymentKey={}", paymentKey);
-
-        return PaymentResponse.from(payment);
     }
 
     @Override

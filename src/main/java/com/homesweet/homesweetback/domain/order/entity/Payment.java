@@ -86,4 +86,12 @@ public class Payment {
     public void partialCancel() {
         this.status = PaymentStatus.PARTIAL_CANCELED;
     }
+
+    public void requestCancel() {
+        this.status = PaymentStatus.CANCEL_REQUESTED;
+    }
+
+    public void cancelFailed() {
+        this.status = PaymentStatus.CANCEL_FAILED;
+    }
 }
