@@ -19,6 +19,8 @@ export function setup() {
     } else {
         console.log(`BASE_URL from env=${baseUrl}`);
     }
+    console.log(`enterprise template: using realistic-checkout-test.js settings`);
+    console.log(`CART_ADD_MAX_RETRIES=${__ENV.CART_ADD_MAX_RETRIES || '3'}, CART_ADD_RETRY_DELAY_MS=${__ENV.CART_ADD_RETRY_DELAY_MS || '30'}`);
     return realisticSetup();
 }
 

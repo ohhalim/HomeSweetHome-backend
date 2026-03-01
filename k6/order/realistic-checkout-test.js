@@ -21,6 +21,7 @@ const cartAddErrors = new Counter('cart_add_errors');
 const cartSnapshotErrors = new Counter('cart_snapshot_errors');
 const cartAddFallbackAttempts = new Counter('cart_add_fallback_attempts');
 const cartAddFallbackSuccess = new Counter('cart_add_fallback_success');
+const cartAddRetryExhausted = new Counter('cart_add_retry_exhausted');
 const orderCreateErrors = new Counter('order_create_errors');
 const paymentConfirmErrors = new Counter('payment_confirm_errors');
 const paymentLookupErrors = new Counter('payment_lookup_errors');
@@ -64,6 +65,8 @@ const PAYMENT_VERIFY_ORDER_STATUS = parseBool(__ENV.PAYMENT_VERIFY_ORDER_STATUS,
 const CART_TYPE_LIMIT = parsePositiveInt(__ENV.CART_TYPE_LIMIT, 10);
 const CART_FETCH_SIZE = parsePositiveInt(__ENV.CART_FETCH_SIZE, 20);
 const CART_ADD_LIMIT_FALLBACK = parseBool(__ENV.CART_ADD_LIMIT_FALLBACK, true);
+const CART_ADD_MAX_RETRIES = parsePositiveInt(__ENV.CART_ADD_MAX_RETRIES, 3);
+const CART_ADD_RETRY_DELAY_MS = parseNonNegativeInt(__ENV.CART_ADD_RETRY_DELAY_MS, 30);
 
 const THINK_TIME_MIN = Number(__ENV.THINK_TIME_MIN || '0.2');
 const THINK_TIME_MAX = Number(__ENV.THINK_TIME_MAX || '1.0');
@@ -238,35 +241,44 @@ function viewStock(data) {
 
 function addToCart(userId, skuId, quantity) {
     const start = Date.now();
+    let response = null;
+    let candidateSkuId = skuId;
 
-    const payload = JSON.stringify({
-        skuId,
-        quantity,
-    });
+    for (let attempt = 0; attempt < CART_ADD_MAX_RETRIES; attempt += 1) {
+        const payload = JSON.stringify({
+            skuId: candidateSkuId,
+            quantity,
+        });
 
-    let response = http.post(`${BASE_URL}/api/v1/carts`, payload, {
-        headers: jsonAuthHeaders(userId),
-        tags: { name: 'POST /carts' },
-    });
+        response = http.post(`${BASE_URL}/api/v1/carts`, payload, {
+            headers: jsonAuthHeaders(userId),
+            tags: { name: 'POST /carts' },
+        });
 
-    if (!isSuccessfulStatus(response.status) && CART_ADD_LIMIT_FALLBACK && canRetryCartAdd(response.status)) {
+        if (isSuccessfulStatus(response.status)) {
+            break;
+        }
+
+        if (!CART_ADD_LIMIT_FALLBACK || !canRetryCartAdd(response.status) || attempt >= CART_ADD_MAX_RETRIES - 1) {
+            break;
+        }
+
         const cartItems = getCartItems(userId);
-        if (cartItems.length >= CART_TYPE_LIMIT) {
-            const fallbackItem = pickRandom(cartItems);
-            if (fallbackItem !== null) {
-                cartAddFallbackAttempts.add(1);
-                const fallbackPayload = JSON.stringify({
-                    skuId: fallbackItem.skuId,
-                    quantity,
-                });
-                response = http.post(`${BASE_URL}/api/v1/carts`, fallbackPayload, {
-                    headers: jsonAuthHeaders(userId),
-                    tags: { name: 'POST /carts (fallback)' },
-                });
-                if (isSuccessfulStatus(response.status)) {
-                    cartAddFallbackSuccess.add(1);
-                }
-            }
+        if (cartItems.length === 0) {
+            break;
+        }
+
+        const fallbackCandidates = cartItems.filter((item) => item.skuId !== candidateSkuId);
+        const fallbackItem = fallbackCandidates.length > 0 ? pickRandom(fallbackCandidates) : pickRandom(cartItems);
+        if (fallbackItem === null) {
+            break;
+        }
+
+        cartAddFallbackAttempts.add(1);
+        candidateSkuId = fallbackItem.skuId;
+
+        if (CART_ADD_RETRY_DELAY_MS > 0) {
+            sleep(CART_ADD_RETRY_DELAY_MS / 1000);
         }
     }
 
@@ -278,6 +290,7 @@ function addToCart(userId, skuId, quantity) {
 
     if (!ok) {
         cartAddErrors.add(1);
+        cartAddRetryExhausted.add(1);
         return {
             ok: false,
             cartId: null,
@@ -285,10 +298,13 @@ function addToCart(userId, skuId, quantity) {
         };
     }
 
+    if (candidateSkuId !== skuId) {
+        cartAddFallbackSuccess.add(1);
+    }
+
     let cartId = null;
     try {
-        const body = response.json();
-        cartId = Number(body.id);
+        cartId = parseCartId(response);
     } catch (e) {
         cartId = null;
     }
@@ -331,6 +347,16 @@ function getCartItems(userId) {
             skuId: Number(item.skuId),
         }))
         .filter((item) => Number.isInteger(item.id) && item.id > 0 && Number.isInteger(item.skuId) && item.skuId > 0);
+}
+
+function parseCartId(response) {
+    try {
+        const body = response.json();
+        const cartId = Number(body.id);
+        return Number.isInteger(cartId) ? cartId : null;
+    } catch (e) {
+        return null;
+    }
 }
 
 function createOrder(userId, skuId, quantity, cartId) {
