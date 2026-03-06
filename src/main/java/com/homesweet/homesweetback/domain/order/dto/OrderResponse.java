@@ -35,6 +35,14 @@ public class OrderResponse {
      */
     private Long totalAmount;
 
+    private String recipientName;
+
+    private String recipientPhone;
+
+    private String shippingAddress;
+
+    private String shippingRequest;
+
     private List<OrderItemResponse> orderItems;
 
     private LocalDateTime createdAt;
@@ -52,6 +60,10 @@ public class OrderResponse {
                 .orderName(orderName)
                 .status(order.getStatus())
                 .totalAmount(order.getTotalAmount())
+                .recipientName(order.getRecipientName())
+                .recipientPhone(order.getRecipientPhone())
+                .shippingAddress(order.getShippingAddress())
+                .shippingRequest(order.getShippingRequest())
                 .orderItems(items)
                 .createdAt(order.getCreatedAt())
                 .build();
@@ -66,8 +78,10 @@ public class OrderResponse {
             return "주문";
         }
 
-        String firstProductName = order.getOrderItems().get(0)
-                .getSku().getProduct().getName();
+        String firstProductName = order.getOrderItems().get(0).getProductName();
+        if (firstProductName == null || firstProductName.isBlank()) {
+            return "주문";
+        }
         int itemCount = order.getOrderItems().size();
 
         if (itemCount == 1) {

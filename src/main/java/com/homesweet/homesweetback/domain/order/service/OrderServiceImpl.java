@@ -12,6 +12,7 @@ import com.homesweet.homesweetback.domain.order.entity.OrderItem;
 import com.homesweet.homesweetback.domain.order.entity.OrderStatus;
 import com.homesweet.homesweetback.domain.order.repository.OrderRepository;
 import com.homesweet.homesweetback.domain.product.cart.repository.jpa.CartJPARepository;
+import com.homesweet.homesweetback.domain.product.cart.repository.jpa.entity.CartEntity;
 import com.homesweet.homesweetback.domain.product.product.command.repository.jpa.SkuJPARepository;
 import com.homesweet.homesweetback.domain.product.product.command.repository.jpa.entity.SkuEntity;
 import lombok.RequiredArgsConstructor;
@@ -22,7 +23,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -36,6 +39,11 @@ import java.util.stream.Collectors;
 @Transactional(readOnly = true)
 public class OrderServiceImpl implements OrderService {
 
+    private static final int RECIPIENT_NAME_MAX_LENGTH = 100;
+    private static final int RECIPIENT_PHONE_MAX_LENGTH = 30;
+    private static final int SHIPPING_ADDRESS_MAX_LENGTH = 500;
+    private static final int SHIPPING_REQUEST_MAX_LENGTH = 500;
+
     private final OrderRepository orderRepository;
     private final CartJPARepository cartJPARepository;
     private final SkuJPARepository skuJPARepository;
@@ -48,88 +56,38 @@ public class OrderServiceImpl implements OrderService {
     @Override
     @Transactional
     public OrderResponse createFromCart(Long userId, CreateOrderRequest request) {
-        log.info("주문 생성 시작: userId={}, orderItems={}", userId, request.getOrderItems());
+        if (request == null) {
+            throw new IllegalArgumentException("주문 요청이 비어 있습니다.");
+        }
+
+        log.info("주문 생성 시작: userId={}, itemCount={}",
+                userId, request.getOrderItems() != null ? request.getOrderItems().size() : 0);
 
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
 
-        List<OrderItemRequest> orderItemRequests = request.getOrderItems();
-        if (orderItemRequests == null || orderItemRequests.isEmpty()) {
-            throw new IllegalArgumentException("주문할 상품이 없습니다.");
-        }
+        ShippingInfo shippingInfo = normalizeShippingInfo(request);
+        List<OrderItemRequest> orderItemRequests = validateCreateOrderRequest(request);
+        validateCartItems(userId, orderItemRequests);
 
-        // 내부 호출 대비 방어 검증 (컨트롤러 경유 시 DTO @NotNull/@Positive가 1차 차단)
-        for (OrderItemRequest item : orderItemRequests) {
-            if (item.getSkuId() == null) {
-                throw new IllegalArgumentException("skuId는 필수입니다.");
-            }
-            if (item.getQuantity() == null || item.getQuantity() <= 0) {
-                throw new IllegalArgumentException("수량은 1개 이상이어야 합니다.");
-            }
-        }
+        Map<Long, Integer> skuQuantitiesById = mergeOrderQuantities(orderItemRequests);
+        Map<Long, Long> sourceCartIdBySku = mapSourceCartIdBySku(orderItemRequests);
+        Map<Long, SkuEntity> skuMap = loadSkuMap(skuQuantitiesById.keySet().stream().toList());
+        long totalAmount = calculateTotalAmount(skuQuantitiesById, skuMap);
 
-        Map<Long, Integer> skuQuantitiesById = orderItemRequests.stream()
-                .collect(Collectors.groupingBy(
-                        OrderItemRequest::getSkuId,
-                        LinkedHashMap::new,
-                        Collectors.summingInt(OrderItemRequest::getQuantity)
-                ));
+        reserveStock(skuQuantitiesById);
 
-        List<Long> skuIds = skuQuantitiesById.keySet().stream().toList();
-
-        // SKU 조회 (Product fetch join)
-        List<SkuEntity> skus = skuJPARepository.findAllByIdWithProduct(skuIds);
-
-        if (skus.isEmpty()) {
-            throw new IllegalArgumentException("상품을 찾을 수 없습니다.");
-        }
-
-        // SKU ID -> SKU Entity 매핑
-        Map<Long, SkuEntity> skuMap = skus.stream()
-                .collect(Collectors.toMap(SkuEntity::getId, s -> s));
-        if (skuMap.size() != skuQuantitiesById.size()) {
-            throw new IllegalArgumentException("상품을 찾을 수 없습니다.");
-        }
-
-        // 총액 계산
-        long totalAmount = 0L;
-        for (Map.Entry<Long, Integer> entry : skuQuantitiesById.entrySet()) {
-            SkuEntity sku = skuMap.get(entry.getKey());
-            long unitPrice = sku.getFinalPrice();
-            totalAmount += unitPrice * entry.getValue();
-        }
-
-        // 재고 차감 (DB 원자적 UPDATE)
-        List<Map.Entry<Long, Integer>> deductedEntries = new ArrayList<>();
-        try {
-            for (Map.Entry<Long, Integer> entry : skuQuantitiesById.entrySet()) {
-                Long skuId = entry.getKey();
-                int quantity = entry.getValue();
-                int updatedRows = skuJPARepository.decreaseStock(skuId, (long) quantity);
-                if (updatedRows == 0) {
-                    throw new StockInsufficientException(
-                            "재고가 부족합니다. (SKU: " + skuId + ", 요청 수량: " + quantity + ")");
-                }
-                deductedEntries.add(entry);
-            }
-        } catch (StockInsufficientException e) {
-            // 일부만 차감 성공한 경우 복원
-            for (Map.Entry<Long, Integer> deducted : deductedEntries) {
-                skuJPARepository.increaseStock(deducted.getKey(), (long) deducted.getValue());
-            }
-            throw e;
-        }
-
-        // 주문 생성
-        String orderNumber = generateOrderNumber();
         Order order = Order.builder()
                 .user(user)
-                .orderNumber(orderNumber)
+                .orderNumber(generateOrderNumber())
                 .status(OrderStatus.PENDING)
                 .totalAmount(totalAmount)
+                .recipientName(shippingInfo.recipientName())
+                .recipientPhone(shippingInfo.recipientPhone())
+                .shippingAddress(shippingInfo.shippingAddress())
+                .shippingRequest(shippingInfo.shippingRequest())
                 .build();
 
-        // 주문 상품 추가
         for (Map.Entry<Long, Integer> entry : skuQuantitiesById.entrySet()) {
             SkuEntity sku = skuMap.get(entry.getKey());
             int quantity = entry.getValue();
@@ -137,6 +95,8 @@ public class OrderServiceImpl implements OrderService {
 
             OrderItem orderItem = OrderItem.builder()
                     .sku(sku)
+                    .sourceCartId(sourceCartIdBySku.get(entry.getKey()))
+                    .productName(sku.getProduct().getName())
                     .quantity((long) quantity)
                     .price(unitPrice)
                     .build();
@@ -147,13 +107,6 @@ public class OrderServiceImpl implements OrderService {
         Order savedOrder = orderRepository.save(order);
         log.info("주문 생성 완료: orderId={}, orderNumber={}, totalAmount={}",
                 savedOrder.getId(), savedOrder.getOrderNumber(), savedOrder.getTotalAmount());
-
-        // 장바구니에서 주문된 상품 삭제
-        List<Long> cartIds = request.getCartIds();
-        if (cartIds != null && !cartIds.isEmpty()) {
-            cartJPARepository.deleteAllByUserIdAndIdIn(userId, cartIds);
-            log.info("장바구니에서 상품 삭제 완료: userId={}, cartIds={}", userId, cartIds);
-        }
 
         return OrderResponse.from(savedOrder);
     }
@@ -219,11 +172,188 @@ public class OrderServiceImpl implements OrderService {
         }
     }
 
+    private List<OrderItemRequest> validateCreateOrderRequest(CreateOrderRequest request) {
+        List<OrderItemRequest> orderItemRequests = request.getOrderItems();
+        if (orderItemRequests == null || orderItemRequests.isEmpty()) {
+            throw new IllegalArgumentException("주문할 상품이 없습니다.");
+        }
+
+        for (OrderItemRequest item : orderItemRequests) {
+            if (item.getSkuId() == null) {
+                throw new IllegalArgumentException("skuId는 필수입니다.");
+            }
+            if (item.getQuantity() == null || item.getQuantity() <= 0) {
+                throw new IllegalArgumentException("수량은 1개 이상이어야 합니다.");
+            }
+        }
+
+        return orderItemRequests;
+    }
+
+    private void validateCartItems(Long userId, List<OrderItemRequest> orderItemRequests) {
+        List<Long> cartIds = orderItemRequests.stream()
+                .map(OrderItemRequest::getCartId)
+                .filter(Objects::nonNull)
+                .toList();
+
+        if (cartIds.isEmpty()) {
+            return;
+        }
+
+        if (cartIds.size() != cartIds.stream().distinct().count()) {
+            throw new IllegalArgumentException("중복된 cartId가 포함되어 있습니다.");
+        }
+
+        List<CartEntity> cartItems = cartJPARepository.findAllByUserIdAndIdInWithSkuAndProduct(userId, cartIds);
+        if (cartItems.size() != cartIds.size()) {
+            throw new IllegalArgumentException("유효하지 않은 장바구니 상품이 포함되어 있습니다.");
+        }
+
+        Map<Long, CartEntity> cartItemMap = cartItems.stream()
+                .collect(Collectors.toMap(CartEntity::getId, cart -> cart));
+
+        for (OrderItemRequest requestItem : orderItemRequests) {
+            if (requestItem.getCartId() == null) {
+                continue;
+            }
+
+            CartEntity cartItem = cartItemMap.get(requestItem.getCartId());
+            if (cartItem == null || !cartItem.getSku().getId().equals(requestItem.getSkuId())) {
+                throw new IllegalArgumentException("장바구니 상품 정보가 요청과 일치하지 않습니다.");
+            }
+            if (!cartItem.getQuantity().equals(requestItem.getQuantity())) {
+                throw new IllegalArgumentException("장바구니 수량이 최신 상태와 일치하지 않습니다.");
+            }
+        }
+    }
+
+    private Map<Long, Integer> mergeOrderQuantities(List<OrderItemRequest> orderItemRequests) {
+        return orderItemRequests.stream()
+                .collect(Collectors.groupingBy(
+                        OrderItemRequest::getSkuId,
+                        LinkedHashMap::new,
+                        Collectors.summingInt(OrderItemRequest::getQuantity)
+                ));
+    }
+
+    private Map<Long, Long> mapSourceCartIdBySku(List<OrderItemRequest> orderItemRequests) {
+        Map<Long, Long> sourceCartIdBySku = new LinkedHashMap<>();
+
+        for (OrderItemRequest requestItem : orderItemRequests) {
+            if (requestItem.getCartId() == null) {
+                continue;
+            }
+
+            Long previousCartId = sourceCartIdBySku.putIfAbsent(requestItem.getSkuId(), requestItem.getCartId());
+            if (previousCartId != null && !previousCartId.equals(requestItem.getCartId())) {
+                throw new IllegalArgumentException("동일 SKU에 여러 장바구니 항목을 사용할 수 없습니다.");
+            }
+        }
+
+        return sourceCartIdBySku;
+    }
+
+    private Map<Long, SkuEntity> loadSkuMap(List<Long> skuIds) {
+        List<SkuEntity> skus = skuJPARepository.findAllByIdWithProduct(skuIds);
+        if (skus.isEmpty()) {
+            throw new IllegalArgumentException("상품을 찾을 수 없습니다.");
+        }
+
+        Map<Long, SkuEntity> skuMap = skus.stream()
+                .collect(Collectors.toMap(SkuEntity::getId, sku -> sku));
+        if (skuMap.size() != skuIds.size()) {
+            throw new IllegalArgumentException("상품을 찾을 수 없습니다.");
+        }
+        return skuMap;
+    }
+
+    private long calculateTotalAmount(Map<Long, Integer> skuQuantitiesById, Map<Long, SkuEntity> skuMap) {
+        long totalAmount = 0L;
+        for (Map.Entry<Long, Integer> entry : skuQuantitiesById.entrySet()) {
+            SkuEntity sku = skuMap.get(entry.getKey());
+            totalAmount = Math.addExact(totalAmount, sku.calculateTotalPrice(entry.getValue().longValue()));
+        }
+        return totalAmount;
+    }
+
+    private void reserveStock(Map<Long, Integer> skuQuantitiesById) {
+        List<Map.Entry<Long, Integer>> deductedEntries = new ArrayList<>();
+        try {
+            for (Map.Entry<Long, Integer> entry : skuQuantitiesById.entrySet()) {
+                Long skuId = entry.getKey();
+                long quantity = entry.getValue().longValue();
+                int updatedRows = skuJPARepository.decreaseStock(skuId, quantity);
+                if (updatedRows == 0) {
+                    throw new StockInsufficientException(
+                            "재고가 부족합니다. (SKU: " + skuId + ", 요청 수량: " + quantity + ")");
+                }
+                deductedEntries.add(entry);
+            }
+        } catch (StockInsufficientException e) {
+            for (Map.Entry<Long, Integer> deducted : deductedEntries) {
+                skuJPARepository.increaseStock(deducted.getKey(), deducted.getValue().longValue());
+            }
+            throw e;
+        }
+    }
+
+    private ShippingInfo normalizeShippingInfo(CreateOrderRequest request) {
+        return new ShippingInfo(
+                normalizeRequiredText(request.getRecipientName(), "수령인 이름은 필수입니다.",
+                        RECIPIENT_NAME_MAX_LENGTH, "수령인 이름은 100자를 초과할 수 없습니다."),
+                normalizeRequiredText(request.getRecipientPhone(), "수령인 전화번호는 필수입니다.",
+                        RECIPIENT_PHONE_MAX_LENGTH, "수령인 전화번호는 30자를 초과할 수 없습니다."),
+                normalizeRequiredText(request.getShippingAddress(), "배송 주소는 필수입니다.",
+                        SHIPPING_ADDRESS_MAX_LENGTH, "배송 주소는 500자를 초과할 수 없습니다."),
+                normalizeOptionalText(request.getShippingRequest(), SHIPPING_REQUEST_MAX_LENGTH,
+                        "배송 요청사항은 500자를 초과할 수 없습니다.")
+        );
+    }
+
+    private String normalizeRequiredText(String value, String message) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(message);
+        }
+        return value.trim();
+    }
+
+    private String normalizeRequiredText(String value, String message, int maxLength, String maxLengthMessage) {
+        String normalized = normalizeRequiredText(value, message);
+        validateMaxLength(normalized, maxLength, maxLengthMessage);
+        return normalized;
+    }
+
+    private String normalizeOptionalText(String value, int maxLength, String maxLengthMessage) {
+        if (value == null) {
+            return null;
+        }
+        String normalized = value.trim();
+        if (normalized.isEmpty()) {
+            return null;
+        }
+        validateMaxLength(normalized, maxLength, maxLengthMessage);
+        return normalized;
+    }
+
+    private void validateMaxLength(String value, int maxLength, String message) {
+        if (value.length() > maxLength) {
+            throw new IllegalArgumentException(message);
+        }
+    }
+
     /**
      * 주문번호 생성 (UUID 기반, 토스페이먼츠 orderId로 사용)
      * 최대 64자 제한
      */
     private String generateOrderNumber() {
-        return UUID.randomUUID().toString().replace("-", "").substring(0, 32);
+        return "ORD-" + UUID.randomUUID().toString().replace("-", "").toUpperCase(Locale.ROOT);
+    }
+
+    private record ShippingInfo(
+            String recipientName,
+            String recipientPhone,
+            String shippingAddress,
+            String shippingRequest
+    ) {
     }
 }

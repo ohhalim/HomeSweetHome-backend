@@ -58,10 +58,10 @@ public class PaymentController {
      */
     @Operation(summary = "결제 취소", description = "결제 완료된 주문의 결제 취소")
     @PostMapping("/{paymentKey}/cancel")
-    public ResponseEntity<PaymentResponse> cancelPayment(
+     public ResponseEntity<PaymentResponse> cancelPayment(
             @AuthenticationPrincipal OAuth2UserPrincipal principal,
             @PathVariable String paymentKey,
-            @RequestBody TossPaymentCancelRequest request) {
+            @Valid @RequestBody TossPaymentCancelRequest request) {
 
         log.info("결제 취소 API 호출: userId={}, paymentKey={}", principal.getUserId(), paymentKey);
 

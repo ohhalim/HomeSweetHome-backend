@@ -78,10 +78,15 @@ public class PaymentTransactionalService {
         order.pay();
         orderRepository.save(order);
 
-        List<Long> purchasedSkuIds = order.getOrderItems().stream()
-                .map(item -> item.getSku().getId())
+        List<Long> sourceCartIds = order.getOrderItems().stream()
+                .map(item -> item.getSourceCartId())
+                .filter(Objects::nonNull)
+                .distinct()
                 .toList();
-        cartJPARepository.deleteCartItemNative(userId, purchasedSkuIds);
+        if (!sourceCartIds.isEmpty()) {
+            cartJPARepository.deleteAllByUserIdAndIdIn(userId, sourceCartIds);
+            log.info("결제 완료 장바구니 삭제: userId={}, cartCount={}", userId, sourceCartIds.size());
+        }
 
         return PaymentResponse.from(payment);
     }

@@ -267,6 +267,7 @@ class PaymentServiceTest {
             TossPaymentCancelRequest request = new TossPaymentCancelRequest("고객 요청", null);
             PaymentResponse expected = PaymentResponse.builder().paymentId(1L).paymentKey(paymentKey).build();
 
+            given(tossPaymentsService.cancelPayment(paymentKey, request)).willReturn(Map.of("status", "CANCELED"));
             given(paymentCancellationTransactionalService.finalizeCancelSuccess(paymentKey, true)).willReturn(expected);
 
             // when
@@ -277,6 +278,28 @@ class PaymentServiceTest {
             verify(paymentCancellationTransactionalService, times(1)).markCancelRequested(userId, paymentKey);
             verify(tossPaymentsService, times(1)).cancelPayment(paymentKey, request);
             verify(paymentCancellationTransactionalService, times(1)).finalizeCancelSuccess(paymentKey, true);
+            verify(paymentCancellationTransactionalService, never()).markCancelFailed(anyString());
+        }
+
+        @Test
+        @DisplayName("결제 부분 취소 성공")
+        void cancelPayment_Success_PartialCancel() {
+            Long userId = 1L;
+            String paymentKey = "test_payment_key_123";
+
+            TossPaymentCancelRequest request = new TossPaymentCancelRequest("부분 취소 요청", 5000L);
+            PaymentResponse expected = PaymentResponse.builder().paymentId(1L).paymentKey(paymentKey).build();
+
+            given(tossPaymentsService.cancelPayment(paymentKey, request))
+                    .willReturn(Map.of("status", "PARTIAL_CANCELED"));
+            given(paymentCancellationTransactionalService.finalizeCancelSuccess(paymentKey, false)).willReturn(expected);
+
+            PaymentResponse response = paymentService.cancelPayment(userId, paymentKey, request);
+
+            assertThat(response).isNotNull();
+            verify(paymentCancellationTransactionalService).markCancelRequested(userId, paymentKey);
+            verify(tossPaymentsService).cancelPayment(paymentKey, request);
+            verify(paymentCancellationTransactionalService).finalizeCancelSuccess(paymentKey, false);
             verify(paymentCancellationTransactionalService, never()).markCancelFailed(anyString());
         }
 
