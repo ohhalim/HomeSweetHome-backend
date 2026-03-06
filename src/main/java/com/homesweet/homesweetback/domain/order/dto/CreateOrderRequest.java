@@ -5,6 +5,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.Size;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
@@ -31,23 +32,27 @@ public class CreateOrderRequest {
      * 수령인 이름
      */
     @NotBlank(message = "수령인 이름은 필수입니다.")
+    @Size(max = 100, message = "수령인 이름은 100자를 초과할 수 없습니다.")
     private String recipientName;
 
     /**
      * 수령인 전화번호
      */
     @NotBlank(message = "수령인 전화번호는 필수입니다.")
+    @Size(max = 30, message = "수령인 전화번호는 30자를 초과할 수 없습니다.")
     private String recipientPhone;
 
     /**
      * 배송 주소
      */
     @NotBlank(message = "배송 주소는 필수입니다.")
+    @Size(max = 500, message = "배송 주소는 500자를 초과할 수 없습니다.")
     private String shippingAddress;
 
     /**
      * 배송 요청사항
      */
+    @Size(max = 500, message = "배송 요청사항은 500자를 초과할 수 없습니다.")
     private String shippingRequest;
 
     /**

@@ -22,7 +22,7 @@ public class OrderItemResponse {
         return OrderItemResponse.builder()
                 .orderItemId(orderItem.getId())
                 .skuId(orderItem.getSku().getId())
-                .productName(orderItem.getSku().getProduct().getName())
+                .productName(orderItem.getProductName())
                 .quantity(orderItem.getQuantity())
                 .unitPrice(orderItem.getPrice())
                 .totalPrice(orderItem.getTotalPrice())

@@ -47,4 +47,11 @@ public interface CartJPARepository extends JpaRepository<CartEntity, Long>, Cust
            "JOIN FETCH c.user " +
            "WHERE c.id IN :ids")
     List<CartEntity> findAllByIdInWithSkuAndProduct(@Param("ids") List<Long> ids);
+
+    @Query("SELECT c FROM CartEntity c " +
+           "JOIN FETCH c.sku s " +
+           "JOIN FETCH s.product " +
+           "WHERE c.user.id = :userId AND c.id IN :ids")
+    List<CartEntity> findAllByUserIdAndIdInWithSkuAndProduct(@Param("userId") Long userId,
+                                                             @Param("ids") List<Long> ids);
 }

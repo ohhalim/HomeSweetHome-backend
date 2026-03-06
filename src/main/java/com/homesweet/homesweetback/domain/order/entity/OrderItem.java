@@ -29,6 +29,12 @@ public class OrderItem {
     @JoinColumn(name = "sku_id", nullable = false)
     private SkuEntity sku;
 
+    @Column(name = "source_cart_id")
+    private Long sourceCartId;
+
+    @Column(name = "product_name", nullable = false, length = 100)
+    private String productName;
+
     @Column(nullable = false)
     private Long quantity;
 

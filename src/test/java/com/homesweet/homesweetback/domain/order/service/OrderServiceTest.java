@@ -3,6 +3,7 @@ package com.homesweet.homesweetback.domain.order.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -26,11 +27,14 @@ import com.homesweet.homesweetback.domain.auth.entity.User;
 import com.homesweet.homesweetback.domain.auth.entity.UserRole;
 import com.homesweet.homesweetback.domain.auth.repository.UserRepository;
 import com.homesweet.homesweetback.domain.order.dto.CreateOrderRequest;
+import com.homesweet.homesweetback.domain.order.dto.OrderItemResponse;
 import com.homesweet.homesweetback.domain.order.dto.OrderResponse;
 import com.homesweet.homesweetback.domain.order.entity.Order;
+import com.homesweet.homesweetback.domain.order.entity.OrderItem;
 import com.homesweet.homesweetback.domain.order.entity.OrderStatus;
 import com.homesweet.homesweetback.domain.order.repository.OrderRepository;
 import com.homesweet.homesweetback.domain.product.cart.repository.jpa.CartJPARepository;
+import com.homesweet.homesweetback.domain.product.cart.repository.jpa.entity.CartEntity;
 import com.homesweet.homesweetback.domain.product.product.command.repository.jpa.SkuJPARepository;
 import com.homesweet.homesweetback.domain.product.product.command.repository.jpa.entity.ProductEntity;
 import com.homesweet.homesweetback.domain.product.product.command.repository.jpa.entity.SkuEntity;
@@ -87,6 +91,10 @@ class OrderServiceTest {
                 .orderNumber("TEST-ORDER-001")
                 .status(status)
                 .totalAmount(50000L)
+                .recipientName("홍길동")
+                .recipientPhone("01012345678")
+                .shippingAddress("서울시 강남구")
+                .shippingRequest("문 앞에 놓아주세요")
                 .build();
     }
 
@@ -97,13 +105,42 @@ class OrderServiceTest {
         SkuEntity sku = mock(SkuEntity.class);
         given(sku.getId()).willReturn(skuId);
         given(sku.getFinalPrice()).willReturn(price);
+        given(sku.calculateTotalPrice(anyLong())).willAnswer(invocation -> price * invocation.getArgument(0, Long.class));
         given(sku.getProduct()).willReturn(product);
         return sku;
+    }
+
+    private CartEntity createTestCart(Long cartId, User user, SkuEntity sku, Integer quantity) {
+        return CartEntity.builder()
+                .id(cartId)
+                .user(user)
+                .sku(sku)
+                .quantity(quantity)
+                .build();
+    }
+
+    private SkuEntity createStockOnlySku(Long skuId) {
+        SkuEntity sku = mock(SkuEntity.class);
+        given(sku.getId()).willReturn(skuId);
+        return sku;
+    }
+
+    private OrderItem createTestOrderItem(SkuEntity sku, long quantity, long unitPrice) {
+        return OrderItem.builder()
+                .sku(sku)
+                .productName("스냅샷상품")
+                .quantity(quantity)
+                .price(unitPrice)
+                .build();
     }
 
     private CreateOrderRequest createRequest(List<CreateOrderRequest.OrderItemRequest> items) {
         CreateOrderRequest request = new CreateOrderRequest();
         setField(request, "orderItems", items);
+        setField(request, "recipientName", "홍길동");
+        setField(request, "recipientPhone", "01012345678");
+        setField(request, "shippingAddress", "서울시 강남구 테헤란로 1");
+        setField(request, "shippingRequest", "문 앞에 놓아주세요");
         return request;
     }
 
@@ -146,25 +183,28 @@ class OrderServiceTest {
 
             SkuEntity sku1 = createTestSku(1L, 10000L);
             SkuEntity sku2 = createTestSku(2L, 15000L);
+            CartEntity cart1 = createTestCart(1L, user, sku1, 2);
+            CartEntity cart2 = createTestCart(2L, user, sku2, 1);
 
-            // userRepository.findById(1L) 호출되면 ->user 반환해라
             given(userRepository.findById(userId)).willReturn(Optional.of(user));
+            given(cartJPARepository.findAllByUserIdAndIdInWithSkuAndProduct(userId, List.of(1L, 2L)))
+                    .willReturn(List.of(cart1, cart2));
             given(skuJPARepository.findAllByIdWithProduct(List.of(1L, 2L))).willReturn(List.of(sku1, sku2));
-            // orderRepository.save() 호출되면 -> 전달받은 order 그대로 반환
-            given(orderRepository.save(any(Order.class))).willAnswer(invocation -> {
-                return invocation.getArgument(0);
-            });
-            // when
-            // 실제 테스트 대상 메서드 호출 - 주문 생성
+            given(skuJPARepository.decreaseStock(1L, 2L)).willReturn(1);
+            given(skuJPARepository.decreaseStock(2L, 1L)).willReturn(1);
+            given(orderRepository.save(any(Order.class))).willAnswer(invocation -> invocation.getArgument(0));
+
             OrderResponse response = orderService.createFromCart(userId, request);
 
-            // then
-            // 응답이 null이 아닌지 확인
             assertThat(response).isNotNull();
             assertThat(response.getTotalAmount()).isEqualTo(35000L);
+            assertThat(response.getOrderNumber()).startsWith("ORD-");
+            assertThat(response.getRecipientName()).isEqualTo("홍길동");
+            assertThat(response.getShippingAddress()).isEqualTo("서울시 강남구 테헤란로 1");
+            assertThat(response.getOrderItems()).extracting(OrderItemResponse::getProductName)
+                    .containsExactly("테스트상품1", "테스트상품2");
             verify(orderRepository, times(1)).save(any(Order.class));
-            verify(cartJPARepository, times(1)).deleteAllByUserIdAndIdIn(userId, List.of(1L, 2L));
-
+            verify(cartJPARepository, never()).deleteAllByUserIdAndIdIn(any(), any());
         }
 
         @Test
@@ -182,15 +222,40 @@ class OrderServiceTest {
 
             given(userRepository.findById(userId)).willReturn(Optional.of(user));
             given(skuJPARepository.findAllByIdWithProduct(List.of(1L))).willReturn(List.of(sku1));
+            given(skuJPARepository.decreaseStock(1L, 3L)).willReturn(1);
             given(orderRepository.save(any(Order.class))).willAnswer(invocation -> invocation.getArgument(0));
 
-            // when
             OrderResponse response = orderService.createFromCart(userId, request);
 
-            // then
             assertThat(response).isNotNull();
             assertThat(response.getTotalAmount()).isEqualTo(30000L);
             verify(cartJPARepository, never()).deleteAllByUserIdAndIdIn(any(), any());
+        }
+
+        @Test
+        @DisplayName("주문 생성 성공 - 배송 정보 trim 및 빈 요청사항 null 처리")
+        void createOrder_Success_NormalizesShippingInfo() {
+            Long userId = 1L;
+            CreateOrderRequest request = createRequest(List.of(createOrderItem(null, 1L, 1)));
+            User user = createTestUser(userId);
+            SkuEntity sku1 = createTestSku(1L, 10000L);
+
+            setField(request, "recipientName", "  홍길동  ");
+            setField(request, "recipientPhone", " 01012345678 ");
+            setField(request, "shippingAddress", "  서울시 강남구 테헤란로 1  ");
+            setField(request, "shippingRequest", "   ");
+
+            given(userRepository.findById(userId)).willReturn(Optional.of(user));
+            given(skuJPARepository.findAllByIdWithProduct(List.of(1L))).willReturn(List.of(sku1));
+            given(skuJPARepository.decreaseStock(1L, 1L)).willReturn(1);
+            given(orderRepository.save(any(Order.class))).willAnswer(invocation -> invocation.getArgument(0));
+
+            OrderResponse response = orderService.createFromCart(userId, request);
+
+            assertThat(response.getRecipientName()).isEqualTo("홍길동");
+            assertThat(response.getRecipientPhone()).isEqualTo("01012345678");
+            assertThat(response.getShippingAddress()).isEqualTo("서울시 강남구 테헤란로 1");
+            assertThat(response.getShippingRequest()).isNull();
         }
 
         @Test
@@ -207,6 +272,39 @@ class OrderServiceTest {
             assertThatThrownBy(() -> orderService.createFromCart(userId, request))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("주문할 상품이 없습니다");
+        }
+
+        @Test
+        @DisplayName("주문 생성 실패 - 수령인 이름 길이 초과")
+        void createOrder_Fail_RecipientNameTooLong() {
+            Long userId = 1L;
+            CreateOrderRequest request = createRequest(List.of(createOrderItem(null, 1L, 1)));
+            User user = createTestUser(userId);
+
+            setField(request, "recipientName", "가".repeat(101));
+            given(userRepository.findById(userId)).willReturn(Optional.of(user));
+
+            assertThatThrownBy(() -> orderService.createFromCart(userId, request))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("수령인 이름은 100자를 초과할 수 없습니다");
+        }
+
+        @Test
+        @DisplayName("주문 생성 실패 - 장바구니 수량 불일치")
+        void createOrder_Fail_CartQuantityMismatch() {
+            Long userId = 1L;
+            User user = createTestUser(userId);
+            SkuEntity sku1 = createStockOnlySku(1L);
+            CartEntity cart1 = createTestCart(1L, user, sku1, 2);
+            CreateOrderRequest request = createRequest(List.of(createOrderItem(1L, 1L, 1)));
+
+            given(userRepository.findById(userId)).willReturn(Optional.of(user));
+            given(cartJPARepository.findAllByUserIdAndIdInWithSkuAndProduct(userId, List.of(1L)))
+                    .willReturn(List.of(cart1));
+
+            assertThatThrownBy(() -> orderService.createFromCart(userId, request))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("장바구니 수량이 최신 상태와 일치하지 않습니다");
         }
     }
 
@@ -322,33 +420,31 @@ class OrderServiceTest {
         @Test
         @DisplayName("주문 취소 성공")
         void cancelOrder_Success() {
-            // given
             Long userId = 1L;
             Long orderId = 100L;
             User user = createTestUser(userId);
             Order order = createTestOrder(orderId, user, OrderStatus.PENDING);
+            SkuEntity sku = createStockOnlySku(1L);
+            order.addOrderItem(createTestOrderItem(sku, 2L, 10000L));
 
-            given(orderRepository.findById(orderId)).willReturn(Optional.of(order));
+            given(orderRepository.findByIdWithItems(orderId)).willReturn(Optional.of(order));
 
-            // when
             orderService.cancelOrder(orderId, userId);
 
-            // then
             assertThat(order.getStatus()).isEqualTo(OrderStatus.CANCELLED);
+            verify(skuJPARepository).increaseStock(1L, 2L);
         }
 
         @Test
         @DisplayName("주문 취소 실패 - 이미 결제된 주문")
         void cancelOrder_Fail_AlreadyPaid() {
-            // given
             Long userId = 1L;
             Long orderId = 100L;
             User user = createTestUser(userId);
             Order order = createTestOrder(orderId, user, OrderStatus.PAID);
 
-            given(orderRepository.findById(orderId)).willReturn(Optional.of(order));
+            given(orderRepository.findByIdWithItems(orderId)).willReturn(Optional.of(order));
 
-            // when & then
             assertThatThrownBy(() -> orderService.cancelOrder(orderId, userId))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("결제 대기 상태의 주문만 취소할 수 있습니다");

@@ -9,6 +9,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -39,38 +40,47 @@ public class PaymentServiceImpl implements PaymentService {
                 userId, orderId, request.getAmount());
 
         if (!paymentRedisGuardService.tryAcquireIdempotency(paymentKey)) {
-            return paymentRepository.findByPaymentKey(paymentKey)
-                    .map(PaymentResponse::from)
-                    .orElseThrow(() -> new IllegalStateException("이미 처리 중인 결제 요청입니다."));
+            return findCompletedPaymentOrThrow(paymentKey);
         }
 
+        String orderLockToken = acquireOrderLock(orderId, paymentKey);
+        try {
+            return approveAndPersistPayment(userId, request);
+        } catch (Exception e) {
+            paymentRedisGuardService.clearIdempotency(paymentKey);
+            throw e;
+        } finally {
+            paymentRedisGuardService.releaseOrderLock(orderId, orderLockToken);
+        }
+    }
+
+    private PaymentResponse findCompletedPaymentOrThrow(String paymentKey) {
+        return paymentRepository.findByPaymentKey(paymentKey)
+                .map(PaymentResponse::from)
+                .orElseThrow(() -> new IllegalStateException("이미 처리 중인 결제 요청입니다."));
+    }
+
+    private String acquireOrderLock(String orderId, String paymentKey) {
         String orderLockToken = paymentRedisGuardService.tryAcquireOrderLock(orderId);
         if (orderLockToken == null) {
             paymentRedisGuardService.clearIdempotency(paymentKey);
             throw new IllegalStateException("이미 해당 주문의 결제가 처리 중입니다.");
         }
+        return orderLockToken;
+    }
 
-        boolean tossApproved = false;
+    private PaymentResponse approveAndPersistPayment(Long userId, TossPaymentConfirmRequest request) {
+        String paymentKey = request.getPaymentKey();
+        Map<String, Object> tossResponse = tossPaymentsService.confirmPayment(request);
+
         try {
-            Map<String, Object> tossResponse = tossPaymentsService.confirmPayment(request);
-            tossApproved = true;
-
             PaymentResponse response = paymentTransactionalService.persistConfirmedPayment(userId, request, tossResponse);
             paymentRedisGuardService.markIdempotencyCompleted(paymentKey);
-
-            log.info("Payment confirm completed. paymentKey={}, orderId={}", paymentKey, orderId);
+            log.info("Payment confirm completed. paymentKey={}, orderId={}", paymentKey, request.getOrderId());
             return response;
-
         } catch (Exception e) {
-            paymentRedisGuardService.clearIdempotency(paymentKey);
-
-            if (tossApproved) {
-                cancelPaymentForCompensation(paymentKey);
-            }
+            cancelPaymentForCompensation(paymentKey);
             throw e;
-
-        } finally {
-            paymentRedisGuardService.releaseOrderLock(orderId, orderLockToken);
         }
     }
 
@@ -91,20 +101,34 @@ public class PaymentServiceImpl implements PaymentService {
         paymentCancellationTransactionalService.markCancelRequested(userId, paymentKey);
 
         try {
-            tossPaymentsService.cancelPayment(paymentKey, request);
-            boolean fullCancel = request.getCancelAmount() == null;
-            if (!fullCancel) {
-                Payment payment = paymentRepository.findByPaymentKey(paymentKey)
-                        .orElseThrow(() -> new IllegalArgumentException("결제 정보를 찾을 수 없습니다."));
-                fullCancel = request.getCancelAmount() >= payment.getAmount();
-            }
-            PaymentResponse response = paymentCancellationTransactionalService.finalizeCancelSuccess(paymentKey, fullCancel);
+            Map<String, Object> tossResponse = tossPaymentsService.cancelPayment(paymentKey, request);
+            boolean fullCancel = isFullCancel(tossResponse);
+            PaymentResponse response = paymentCancellationTransactionalService
+                    .finalizeCancelSuccess(paymentKey, fullCancel);
             log.info("Payment cancel completed. paymentKey={}, fullCancel={}", paymentKey, fullCancel);
             return response;
         } catch (Exception e) {
             paymentCancellationTransactionalService.markCancelFailed(paymentKey);
             throw e;
         }
+    }
+
+    private boolean isFullCancel(Map<String, Object> tossResponse) {
+        String status = normalizeStatus(tossResponse.get("status"));
+        if ("CANCELED".equals(status) || "CANCELLED".equals(status)) {
+            return true;
+        }
+        if ("PARTIAL_CANCELED".equals(status) || "PARTIAL_CANCELLED".equals(status)) {
+            return false;
+        }
+        throw new IllegalStateException("토스 결제 취소 응답의 status를 확인할 수 없습니다.");
+    }
+
+    private String normalizeStatus(Object value) {
+        if (value == null) {
+            return "";
+        }
+        return value.toString().trim().toUpperCase(Locale.ROOT).replace('-', '_');
     }
 
     @Override
