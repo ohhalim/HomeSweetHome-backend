@@ -27,7 +27,7 @@ import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.client.RestTemplate;
 
 import com.homesweet.homesweetback.common.config.TossPaymentsConfig;
-import com.homesweet.homesweetback.common.exception.TossApiFailedException;
+import com.homesweet.homesweetback.common.exception.TossApiClientException;
 import com.homesweet.homesweetback.common.util.PaymentApiClient;
 import com.homesweet.homesweetback.domain.order.dto.TossPaymentCancelRequest;
 import com.homesweet.homesweetback.domain.order.dto.TossPaymentConfirmRequest;
@@ -103,7 +103,7 @@ class TossPaymentsServiceTest {
         }
 
         @Test
-        @DisplayName("결제 승인 실패 - RestClientResponseException 발생 시 TossApiFailedException")
+        @DisplayName("결제 승인 실패 - RestClientResponseException 발생 시 TossApiClientException")
         void confirmPayment_Fail_RestClientException() {
             // given
             TossPaymentConfirmRequest request = TossPaymentConfirmRequest.builder()
@@ -115,17 +115,17 @@ class TossPaymentsServiceTest {
             given(tossPaymentsConfig.getConfirmUrl()).willReturn("https://api.tosspayments.com/v1/payments/confirm");
             given(paymentApiClient.sendPostRequest(anyString(), any(HttpEntity.class)))
                     .willThrow(new RestClientResponseException(
-                            "INVALID_REQUEST", 
-                            HttpStatus.BAD_REQUEST, 
+                            "INVALID_REQUEST",
+                            HttpStatus.BAD_REQUEST,
                             "Bad Request",
-                            null, 
+                            null,
                             "{\"code\":\"INVALID_REQUEST\"}".getBytes(),
                             null));
 
             // when & then
             assertThatThrownBy(() -> tossPaymentsService.confirmPayment(request))
-                    .isInstanceOf(TossApiFailedException.class)
-                    .hasMessageContaining("결제 승인 실패");
+                    .isInstanceOf(TossApiClientException.class)
+                    .hasMessageContaining("결제 승인 요청 오류");
         }
 
         @Test
@@ -228,8 +228,8 @@ class TossPaymentsServiceTest {
 
             // when & then
             assertThatThrownBy(() -> tossPaymentsService.cancelPayment(TEST_PAYMENT_KEY, request))
-                    .isInstanceOf(TossApiFailedException.class)
-                    .hasMessageContaining("결제 취소 실패");
+                    .isInstanceOf(TossApiClientException.class)
+                    .hasMessageContaining("결제 취소 요청 오류");
         }
     }
 
@@ -283,8 +283,8 @@ class TossPaymentsServiceTest {
 
             // when & then
             assertThatThrownBy(() -> tossPaymentsService.getPaymentByPaymentKey("invalid_key"))
-                    .isInstanceOf(TossApiFailedException.class)
-                    .hasMessageContaining("결제 조회 실패");
+                    .isInstanceOf(TossApiClientException.class)
+                    .hasMessageContaining("결제 조회 요청 오류");
         }
     }
 
@@ -337,8 +337,8 @@ class TossPaymentsServiceTest {
 
             // when & then
             assertThatThrownBy(() -> tossPaymentsService.getPaymentByOrderId(invalidOrderId))
-                    .isInstanceOf(TossApiFailedException.class)
-                    .hasMessageContaining("결제 조회 실패");
+                    .isInstanceOf(TossApiClientException.class)
+                    .hasMessageContaining("결제 조회 요청 오류");
         }
     }
 

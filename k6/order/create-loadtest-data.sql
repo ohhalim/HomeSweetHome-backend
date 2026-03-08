@@ -20,6 +20,37 @@ VALUES
     (9005, 'k6-load-user05@local.test', 'K6 Load User 05', '서울시 용산구', 'GOOGLE', 'k6-load-user05', 'USER', '010-9005-0005', '1990-05-05'),
     (9010, 'k6-load-seller@local.test', 'K6 Load Seller', '서울시 마포구', 'GOOGLE', 'k6-load-seller', 'SELLER', '010-9010-0000', '1988-10-10');
 
+-- 1-1) 추가 부하테스트 유저 100명 (9101 ~ 9200)
+INSERT IGNORE INTO users (user_id, email, name, address, provider, provider_id, role, phone_number, birth_date)
+SELECT
+    9101 + seq.n AS user_id,
+    CONCAT('k6-load-user', LPAD(6 + seq.n, 3, '0'), '@local.test') AS email,
+    CONCAT('K6 Load User ', LPAD(6 + seq.n, 3, '0')) AS name,
+    CASE MOD(seq.n, 5)
+        WHEN 0 THEN '서울시 강남구'
+        WHEN 1 THEN '서울시 마포구'
+        WHEN 2 THEN '서울시 송파구'
+        WHEN 3 THEN '서울시 성동구'
+        ELSE '서울시 서초구'
+        END AS address,
+    'GOOGLE' AS provider,
+    CONCAT('k6-load-user', LPAD(6 + seq.n, 3, '0')) AS provider_id,
+    'USER' AS role,
+    CONCAT('010-', LPAD(9101 + seq.n, 4, '0'), '-', LPAD(9101 + seq.n, 4, '0')) AS phone_number,
+    DATE_ADD('1990-01-01', INTERVAL MOD(seq.n, 3650) DAY) AS birth_date
+FROM (
+         SELECT ones.n + (tens.n * 10) AS n
+         FROM (
+                  SELECT 0 AS n UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4
+                  UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9
+              ) ones
+                  CROSS JOIN (
+             SELECT 0 AS n UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4
+             UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9
+         ) tens
+     ) seq
+WHERE seq.n < 100;
+
 -- 2) 테스트 카테고리 (상품 조회/스크랩 시 필요)
 INSERT IGNORE INTO product_category (category_id, name, parent_id, depth)
 VALUES
@@ -52,6 +83,7 @@ VALUES
 
 -- 5) verification
 SELECT 'users' AS table_name, COUNT(*) AS cnt FROM users WHERE user_id BETWEEN 9001 AND 9010;
+SELECT 'users_extended' AS table_name, COUNT(*) AS cnt FROM users WHERE user_id BETWEEN 9101 AND 9200;
 SELECT 'categories' AS table_name, COUNT(*) AS cnt FROM product_category WHERE category_id BETWEEN 9901 AND 9903;
 SELECT 'products' AS table_name, COUNT(*) AS cnt FROM products WHERE product_id BETWEEN 8801 AND 8805;
 SELECT 'skus' AS table_name, COUNT(*) AS cnt FROM sku WHERE sku_id BETWEEN 99001 AND 99010;

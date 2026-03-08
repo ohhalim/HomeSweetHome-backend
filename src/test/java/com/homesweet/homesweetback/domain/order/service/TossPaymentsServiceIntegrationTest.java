@@ -32,6 +32,7 @@ import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.RestTemplate;
 
 import com.homesweet.homesweetback.common.config.TossPaymentsConfig;
+import com.homesweet.homesweetback.common.exception.TossApiClientException;
 import com.homesweet.homesweetback.common.exception.TossApiFailedException;
 import com.homesweet.homesweetback.common.util.PaymentApiClient;
 import com.homesweet.homesweetback.domain.order.dto.TossPaymentCancelRequest;
@@ -180,7 +181,7 @@ class TossPaymentsServiceIntegrationTest {
         }
 
         @Test
-        @DisplayName("4xx 클라이언트 에러 발생 시 TossApiFailedException으로 변환")
+        @DisplayName("4xx 클라이언트 에러 발생 시 TossApiClientException으로 변환")
         void confirmPayment_ClientError_ThrowsTossApiFailedException() {
             // given
             TossPaymentConfirmRequest request = TossPaymentConfirmRequest.builder()
@@ -196,8 +197,8 @@ class TossPaymentsServiceIntegrationTest {
 
             // when & then
             assertThatThrownBy(() -> tossPaymentsService.confirmPayment(request))
-                    .isInstanceOf(TossApiFailedException.class)
-                    .hasMessageContaining("결제 승인 실패");
+                    .isInstanceOf(TossApiClientException.class)
+                    .hasMessageContaining("결제 승인 요청 오류");
         }
 
         @Test

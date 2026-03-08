@@ -36,6 +36,14 @@ out/
 ### VS Code ###
 .vscode/
 
+### Local Tooling ###
+node_modules/
+.venv/
+
+### Load Test Artifacts ###
+results.json
+summary.json
+
 
 ### MAC OS ###
 .DS_Store

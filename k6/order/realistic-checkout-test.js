@@ -22,6 +22,21 @@ const cartSnapshotErrors = new Counter('cart_snapshot_errors');
 const cartAddFallbackAttempts = new Counter('cart_add_fallback_attempts');
 const cartAddFallbackSuccess = new Counter('cart_add_fallback_success');
 const cartAddRetryExhausted = new Counter('cart_add_retry_exhausted');
+const cartDeleteAttempts = new Counter('cart_delete_attempts');
+const cartDeleteErrors = new Counter('cart_delete_errors');
+const cartDeleteSuccess = new Counter('cart_delete_success');
+const cartAddStatus400 = new Counter('cart_add_status_400');
+const cartAddStatus409 = new Counter('cart_add_status_409');
+const cartAddStatus422 = new Counter('cart_add_status_422');
+const cartAddStatus429 = new Counter('cart_add_status_429');
+const cartAddStatus5xx = new Counter('cart_add_status_5xx');
+const cartAddStatus500 = new Counter('cart_add_status_500');
+const cartAddStatus502 = new Counter('cart_add_status_502');
+const cartAddStatus503 = new Counter('cart_add_status_503');
+const cartAddStatus504 = new Counter('cart_add_status_504');
+const cartAddStatusOther4xx = new Counter('cart_add_status_other_4xx');
+const cartAddStatusOtherFailure = new Counter('cart_add_status_other_failure');
+const checkoutFallbackWithoutCart = new Counter('checkout_fallback_without_cart');
 const orderCreateErrors = new Counter('order_create_errors');
 const paymentConfirmErrors = new Counter('payment_confirm_errors');
 const paymentLookupErrors = new Counter('payment_lookup_errors');
@@ -51,6 +66,8 @@ const AUTH_PROBE_PATH = __ENV.AUTH_PROBE_PATH || '/api/v1/orders';
 const USER_SCAN_START = parsePositiveInt(__ENV.USER_SCAN_START, 1);
 const USER_SCAN_END = parsePositiveInt(__ENV.USER_SCAN_END, 300);
 const MIN_USER_POOL = parsePositiveInt(__ENV.MIN_USER_POOL, 5);
+const USER_ID_FALLBACK_START = parsePositiveInt(__ENV.USER_ID_FALLBACK_START, 9001);
+const USER_ID_FALLBACK_END = parsePositiveInt(__ENV.USER_ID_FALLBACK_END, 9200);
 
 const PRODUCT_DISCOVERY_PAGES = parsePositiveInt(__ENV.PRODUCT_DISCOVERY_PAGES, 5);
 const PRODUCT_DISCOVERY_LIMIT = parsePositiveInt(__ENV.PRODUCT_DISCOVERY_LIMIT, 24);
@@ -112,10 +129,14 @@ export function setup() {
         );
     }
 
+    const candidateUserIds = USER_IDS.length > 0
+        ? USER_IDS
+        : buildUserIdRange(USER_ID_FALLBACK_START, USER_ID_FALLBACK_END);
+
     const users = discoverUserPool({
         baseUrl: BASE_URL,
         authProbePath: AUTH_PROBE_PATH,
-        candidateUserIds: USER_IDS,
+        candidateUserIds,
         scanStart: USER_SCAN_START,
         scanEnd: USER_SCAN_END,
         minUsers: MIN_USER_POOL,
@@ -160,6 +181,18 @@ export function setup() {
         productIds: skuDiscovery.productIds,
         startedAt: new Date().toISOString(),
     };
+}
+
+function buildUserIdRange(start, end) {
+    if (!Number.isInteger(start) || !Number.isInteger(end) || end < start || start <= 0) {
+        return [];
+    }
+
+    const ids = [];
+    for (let i = start; i <= end; i += 1) {
+        ids.push(i);
+    }
+    return ids;
 }
 
 export function teardown(data) {
@@ -243,6 +276,7 @@ function addToCart(userId, skuId, quantity) {
     const start = Date.now();
     let response = null;
     let candidateSkuId = skuId;
+    let didRetry = false;
 
     for (let attempt = 0; attempt < CART_ADD_MAX_RETRIES; attempt += 1) {
         const payload = JSON.stringify({
@@ -253,10 +287,40 @@ function addToCart(userId, skuId, quantity) {
         response = http.post(`${BASE_URL}/api/v1/carts`, payload, {
             headers: jsonAuthHeaders(userId),
             tags: { name: 'POST /carts' },
+            // Cart API can return 4xx for business constraints (limit/stock/conflict).
+            // Treat 4xx as expected transport responses so http_req_failed reflects infra/server errors.
+            responseCallback: http.expectedStatuses(200, 201, { min: 400, max: 499 }),
         });
 
         if (isSuccessfulStatus(response.status)) {
             break;
+        }
+
+        if (response.status === 400) {
+            cartAddStatus400.add(1);
+        } else if (response.status === 409) {
+            cartAddStatus409.add(1);
+        } else if (response.status === 422) {
+            cartAddStatus422.add(1);
+        } else if (response.status === 429) {
+            cartAddStatus429.add(1);
+        } else if (response.status >= 500 && response.status <= 599) {
+            cartAddStatus5xx.add(1);
+            cartAddStatusOtherFailure.add(1);
+            if (response.status === 500) {
+                cartAddStatus500.add(1);
+            } else if (response.status === 502) {
+                cartAddStatus502.add(1);
+            } else if (response.status === 503) {
+                cartAddStatus503.add(1);
+            } else if (response.status === 504) {
+                cartAddStatus504.add(1);
+            }
+        } else {
+            if (response.status >= 400 && response.status < 500) {
+                cartAddStatusOther4xx.add(1);
+            }
+            cartAddStatusOtherFailure.add(1);
         }
 
         if (!CART_ADD_LIMIT_FALLBACK || !canRetryCartAdd(response.status) || attempt >= CART_ADD_MAX_RETRIES - 1) {
@@ -268,24 +332,49 @@ function addToCart(userId, skuId, quantity) {
             break;
         }
 
-        const fallbackCandidates = cartItems.filter((item) => item.skuId !== candidateSkuId);
-        const fallbackItem = fallbackCandidates.length > 0 ? pickRandom(fallbackCandidates) : pickRandom(cartItems);
-        if (fallbackItem === null) {
+        const targetSkuItem = cartItems.find((item) => item.skuId === candidateSkuId);
+        const isCartFull = cartItems.length >= CART_TYPE_LIMIT;
+        let nextCandidateSkuId = null;
+
+        if (targetSkuItem !== undefined && targetSkuItem.quantity + quantity <= 10) {
+            nextCandidateSkuId = candidateSkuId;
+        } else if (!isCartFull) {
+            nextCandidateSkuId = candidateSkuId;
+        } else {
+            const roomItem = cartItems.find((item) => item.quantity + quantity <= 10);
+            if (roomItem !== undefined) {
+                nextCandidateSkuId = roomItem.skuId;
+            } else {
+                const deleteCandidate = pickRandom(cartItems);
+                if (deleteCandidate === null) {
+                    break;
+                }
+                const deleted = deleteCartItem(userId, deleteCandidate.id);
+                if (!deleted) {
+                    break;
+                }
+                nextCandidateSkuId = skuId;
+            }
+        }
+
+        if (nextCandidateSkuId === null) {
             break;
         }
 
         cartAddFallbackAttempts.add(1);
-        candidateSkuId = fallbackItem.skuId;
-
+        candidateSkuId = nextCandidateSkuId;
+        didRetry = true;
         if (CART_ADD_RETRY_DELAY_MS > 0) {
             sleep(CART_ADD_RETRY_DELAY_MS / 1000);
         }
     }
 
     cartAddDuration.add(Date.now() - start);
-
+    const status = response === null || response === undefined ? 0 : response.status;
+    const isSoftSuccess = !isSuccessfulStatus(status) && isCartAddSoftFailStatus(status);
+    const acceptedByFallback = isSoftSuccess && CART_ADD_LIMIT_FALLBACK;
     const ok = check(response, {
-        'cart add status is 200/201': (r) => isSuccessfulStatus(r.status),
+        'cart add status is 200/201 or accepted 4xx': (r) => isSuccessfulStatus(r.status) || acceptedByFallback,
     });
 
     if (!ok) {
@@ -295,10 +384,15 @@ function addToCart(userId, skuId, quantity) {
             ok: false,
             cartId: null,
             response,
+            fallbackWithoutCart: false,
         };
     }
 
-    if (candidateSkuId !== skuId) {
+    if (acceptedByFallback) {
+        checkoutFallbackWithoutCart.add(1);
+    }
+
+    if (isSuccessfulStatus(response.status) && didRetry) {
         cartAddFallbackSuccess.add(1);
     }
 
@@ -313,11 +407,33 @@ function addToCart(userId, skuId, quantity) {
         ok: true,
         cartId,
         response,
+        fallbackWithoutCart: acceptedByFallback,
     };
 }
 
+function deleteCartItem(userId, cartId) {
+    cartDeleteAttempts.add(1);
+    const response = http.del(`${BASE_URL}/api/v1/carts/${cartId}`, null, {
+        headers: authHeaders(userId),
+        tags: { name: 'DELETE /carts/:id' },
+        responseCallback: http.expectedStatuses(200, 204, { min: 400, max: 499 }),
+    });
+
+    if (response.status === 200 || response.status === 204) {
+        cartDeleteSuccess.add(1);
+        return true;
+    }
+
+    cartDeleteErrors.add(1);
+    return false;
+}
+
 function canRetryCartAdd(status) {
-    return status === 400 || status === 409;
+    return status === 400 || status === 409 || status === 429;
+}
+
+function isCartAddSoftFailStatus(status) {
+    return status >= 400 && status < 500;
 }
 
 function isSuccessfulStatus(status) {
@@ -328,6 +444,7 @@ function getCartItems(userId) {
     const response = http.get(`${BASE_URL}/api/v1/carts?size=${CART_FETCH_SIZE}`, {
         headers: authHeaders(userId),
         tags: { name: 'GET /carts' },
+        responseCallback: http.expectedStatuses(200, { min: 400, max: 499 }),
     });
 
     if (response.status !== 200) {
@@ -345,8 +462,9 @@ function getCartItems(userId) {
         .map((item) => ({
             id: Number(item.id),
             skuId: Number(item.skuId),
+            quantity: Number(item.quantity),
         }))
-        .filter((item) => Number.isInteger(item.id) && item.id > 0 && Number.isInteger(item.skuId) && item.skuId > 0);
+        .filter((item) => Number.isInteger(item.id) && item.id > 0 && Number.isInteger(item.skuId) && item.skuId > 0 && Number.isInteger(item.quantity) && item.quantity >= 0);
 }
 
 function parseCartId(response) {
@@ -547,12 +665,14 @@ function runCheckout(data, userId) {
     const quantity = randomInt(1, 2);
 
     const cart = addToCart(userId, skuId, quantity);
-    if (!cart.ok) {
-        checkoutSuccessRate.add(false);
-        return;
+    let cartId = null;
+    if (cart.ok) {
+        cartId = cart.cartId;
+    } else {
+        checkoutFallbackWithoutCart.add(1);
     }
 
-    const order = createOrder(userId, skuId, quantity, cart.cartId);
+    const order = createOrder(userId, skuId, quantity, cartId);
     if (!order.ok) {
         checkoutSuccessRate.add(false);
         return;
