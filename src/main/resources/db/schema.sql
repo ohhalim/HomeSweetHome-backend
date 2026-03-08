@@ -3,7 +3,7 @@
 -- ====================================
 
 -- Grade 테이블
-CREATE TABLE grade (
+CREATE TABLE IF NOT EXISTS grade (
     grade_id INT NOT NULL AUTO_INCREMENT,
     grade VARCHAR(10) NULL,
     fee_rate DECIMAL(5,2) NULL,
@@ -11,7 +11,7 @@ CREATE TABLE grade (
 );
 
 -- Users 테이블 (V1.0.1 + V1.0.2 통합)
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
     user_id BIGINT NOT NULL AUTO_INCREMENT,
     name VARCHAR(20) NOT NULL,
     email VARCHAR(100) NOT NULL,
@@ -35,14 +35,14 @@ CREATE TABLE users (
 -- 알림 관련 테이블
 -- ====================================
 
-CREATE TABLE notification_category (
+CREATE TABLE IF NOT EXISTS notification_category (
     notification_category_id INT NOT NULL AUTO_INCREMENT,
     category_name VARCHAR(50) NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (notification_category_id)
 );
 
-CREATE TABLE notification_template (
+CREATE TABLE IF NOT EXISTS notification_template (
     notification_template_id BIGINT NOT NULL AUTO_INCREMENT,
     notification_category_id INT NOT NULL,
     template_type VARCHAR(50) NOT NULL,
@@ -50,12 +50,12 @@ CREATE TABLE notification_template (
     content VARCHAR(200) NOT NULL,
     redirect_url VARCHAR(255) NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (notification_template_id),
     FOREIGN KEY (notification_category_id) REFERENCES notification_category (notification_category_id) ON DELETE RESTRICT
 );
 
-CREATE TABLE user_notification (
+CREATE TABLE IF NOT EXISTS user_notification (
     user_notification_id BIGINT NOT NULL AUTO_INCREMENT,
     user_id BIGINT NOT NULL,
     notification_template_id BIGINT DEFAULT NULL,

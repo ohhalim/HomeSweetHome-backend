@@ -145,7 +145,7 @@ public class MockTossPaymentsService extends TossPaymentsService {
 
         log.info("[MOCK] 결제 조회 성공: paymentKey={}", paymentKey);
         return response;
-    }
+    }               
 
     @Override
     public Map<String, Object> getPaymentByOrderId(String orderId) {

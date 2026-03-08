@@ -46,23 +46,6 @@ public class AsyncConfig {
         return executor;
     }
 
-    // 최근 검색어 비동기 처리 설정
-    @Bean(name = "recentSearchTaskExecutor")
-    public Executor recentSearchTaskExecutor() {
-        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(4);
-        executor.setMaxPoolSize(8);
-        executor.setQueueCapacity(50);
-        executor.setThreadNamePrefix("recent-search-async-");
-        executor.setWaitForTasksToCompleteOnShutdown(true);
-        executor.setAwaitTerminationSeconds(30);
-        executor.setRejectedExecutionHandler((r, executor1) -> {
-            log.warn("최근 검색어 저장 작업이 거부되었습니다. 큐가 가득 찼습니다.");
-        });
-        executor.initialize();
-        return executor;
-    }
-
     // 상품 검색 이벤트 발행 비동기 처리
     @Bean(name = "productEventExecutor")
     public Executor productEventExecutor() {
