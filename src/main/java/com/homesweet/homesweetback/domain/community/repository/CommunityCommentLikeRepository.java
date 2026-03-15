@@ -25,7 +25,8 @@ public interface CommunityCommentLikeRepository extends JpaRepository<CommunityC
     @Query(value = "INSERT IGNORE INTO community_comment_likes (comment_id, user_id, created_at) VALUES (:commentId, :userId, NOW())", nativeQuery = true)
     int insertCommentLike(@Param("commentId") Long commentId, @Param("userId") Long userId);
 
-    // Redis 초기화용: 좋아요한 사용자 ID 목록 조회
     @Query("SELECT cl.user.id FROM CommunityCommentLikeEntity cl WHERE cl.comment.commentId = :commentId")
     List<Long> findUserIdsByCommentId(@Param("commentId") Long commentId);
+
+    long countByComment_CommentId(Long commentId);
 }

@@ -49,47 +49,18 @@ server:
     max-connections: 10000
     connection-timeout: 20000
 
-resilience4j:
-  circuitbreaker:
-    instances:
-      toss-payments:
-        registerHealthIndicator: true
-        slidingWindowSize: 5           # 최근 5번 요청을 기록
-        failureRateThreshold: 50       # 그 중 50%(즉 3번) 이상 실패하면 서킷 OPEN (차단)
-        waitDurationInOpenState: 10s   # 차단 후 10초 동안은 무조건 요청 거부 (쉬는 시간)
-        permittedNumberOfCallsInHalfOpenState: 3 # 10초 뒤 '반열림' 상태에서 3번만 테스트로 찔러봄
-        automaticTransitionFromOpenToHalfOpenEnabled: true # 시간이 지나면 자동으로 반열림 상태로 전환
-        ignoreExceptions:
-          - com.homesweet.homesweetback.common.exception.TossApiClientException
-          - com.homesweet.homesweetback.common.exception.TossApiAuthenticationException
-  retry:
-    instances:
-      toss-payments-retry:
-        max-attempts: 2
-        wait-duration: 200ms
-        retry-exceptions:
-          - java.io.IOException
-          - org.springframework.web.client.ResourceAccessException
-          - java.net.ConnectException
-        ignore-exceptions:
-          - org.springframework.web.client.HttpClientErrorException
 
 management:
   endpoints:
     web:
       exposure:
-        include: health, circuitbreakers # health와 circuitbreakers 정보를 공개
+        include: health
   endpoint:
     health:
-      show-details: always # 상세 정보 표시
-  health:
-    circuitbreakers:
-      enabled: true # 서킷 브레이커 상태도 health에 포함
+      show-details: always
 
 payments:
   toss:
-    mock:
-      enabled: false
     connect-timeout-ms: 2000
     read-timeout-ms: 5000
 
@@ -102,18 +73,7 @@ community:
   scheduler:
     view-sync-delay: 110000     # 조회수 동기화 주기 (ms)
     comment-sync-delay: 210000  # 댓글수 동기화 주기 (ms)
-    like-sync-delay: 300000     # 좋아요 동기화 주기 (ms)
     warmup-delay: 3600000       # 캐시 워밍업 주기 (ms)
   redis:
     ttl: 7d             # Redis 카운터 TTL
 
-order:
-  scheduler:
-    pending-expire-after-minutes: 15
-    pending-expire-delay-ms: 60000
-    pending-expire-initial-delay-ms: 30000
-    pending-expire-batch-size: 100
-    pending-expire-max-batches: 5
-    cancel-reconcile-delay-ms: 60000
-    cancel-reconcile-initial-delay-ms: 45000
-    cancel-reconcile-batch-size: 50

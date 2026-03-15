@@ -1,6 +1,6 @@
 services:
   spring:
-      image: ohhalim/homesweet-commu:2.7
+      image: ohhalim/homesweet-commu:2.9
     container_name: homesweet-backend
     env_file:
       - .env
