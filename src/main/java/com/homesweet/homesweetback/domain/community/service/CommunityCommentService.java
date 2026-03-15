@@ -132,7 +132,7 @@ public class CommunityCommentService {
                                         .map(CommunityCommentResponse::commentId).toList();
                         // 여러 댓글의 좋아요수를 한 번에 조회 (N+1 방지)
                         Map<Long, Integer> likeCounts = communityCountService
-                                        .getBulkCommentLikeCountsFromCache(commentIds);
+                                        .getBulkCommentLikeCountsFromDb(commentIds);
 
                         // 각 댓글에 최신 좋아요수 적용
                         return cached.get().stream()
@@ -151,7 +151,7 @@ public class CommunityCommentService {
                 // 좋아요수 일괄 조회 (N+1 방지)
                 List<Long> commentIds = comments.stream()
                                 .map(CommunityCommentEntity::getCommentId).toList();
-                Map<Long, Integer> likeCounts = communityCountService.getBulkCommentLikeCountsFromCache(commentIds);
+                Map<Long, Integer> likeCounts = communityCountService.getBulkCommentLikeCountsFromDb(commentIds);
 
                 // 응답 객체 리스트 생성
                 List<CommunityCommentResponse> responses = comments.stream()

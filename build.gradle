@@ -90,9 +90,7 @@ dependencies {
     // 날짜 format
     implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
 
-    // Circuit Braker - 안채호
-    implementation 'io.github.resilience4j:resilience4j-spring-boot3:2.1.0' // 서킷 브레이커 라이브러리 Resilience4j
-    implementation 'org.springframework.boot:spring-boot-starter-aop' // AOP 서킷 브레이커 어노테이션 동작을 위해 필수
+
 
 
 }

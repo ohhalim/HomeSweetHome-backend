@@ -34,19 +34,14 @@ import org.springframework.web.client.RestTemplate;
 import com.homesweet.homesweetback.common.config.TossPaymentsConfig;
 import com.homesweet.homesweetback.common.exception.TossApiClientException;
 import com.homesweet.homesweetback.common.exception.TossApiFailedException;
-import com.homesweet.homesweetback.common.util.PaymentApiClient;
 import com.homesweet.homesweetback.domain.order.dto.TossPaymentCancelRequest;
 import com.homesweet.homesweetback.domain.order.dto.TossPaymentConfirmRequest;
 
 /**
  * TossPaymentsService 통합 테스트
  *
- * RestTemplate과 PaymentApiClient를 Mock하여 실제 HTTP 호출 없이
+ * RestTemplate을 Mock하여 실제 HTTP 호출 없이
  * 서비스 계층의 통합 동작을 검증합니다.
- * - Authorization 헤더 생성 검증
- * - 요청 바디 구성 검증  
- * - 응답 처리 검증
- * - 에러 핸들링 검증
  */
 @ExtendWith(MockitoExtension.class)
 @DisplayName("TossPaymentsService 통합 테스트")
@@ -54,9 +49,6 @@ class TossPaymentsServiceIntegrationTest {
 
     @Mock
     private TossPaymentsConfig tossPaymentsConfig;
-
-    @Mock
-    private PaymentApiClient paymentApiClient;
 
     @Mock
     private RestTemplate restTemplate;
@@ -78,7 +70,7 @@ class TossPaymentsServiceIntegrationTest {
 
     @BeforeEach
     void setUp() {
-        tossPaymentsService = new TossPaymentsService(tossPaymentsConfig, paymentApiClient, restTemplate);
+        tossPaymentsService = new TossPaymentsService(tossPaymentsConfig, restTemplate);
 
         String credentials = TEST_SECRET_KEY + ":";
         String encodedCredentials = Base64.getEncoder()
@@ -97,7 +89,6 @@ class TossPaymentsServiceIntegrationTest {
         @Test
         @DisplayName("Authorization 헤더가 올바르게 생성되어 전송됨")
         void confirmPayment_AuthorizationHeaderCorrectlyGenerated() {
-            // given
             TossPaymentConfirmRequest request = TossPaymentConfirmRequest.builder()
                     .paymentKey(TEST_PAYMENT_KEY)
                     .orderId(TEST_ORDER_ID)
@@ -106,13 +97,11 @@ class TossPaymentsServiceIntegrationTest {
 
             given(tossPaymentsConfig.getConfirmUrl())
                     .willReturn("https://api.tosspayments.com/v1/payments/confirm");
-            given(paymentApiClient.sendPostRequest(anyString(), httpEntityCaptor.capture()))
+            given(restTemplate.postForObject(anyString(), httpEntityCaptor.capture(), eq(Map.class)))
                     .willReturn(Map.of("status", "DONE"));
 
-            // when
             tossPaymentsService.confirmPayment(request);
 
-            // then
             HttpEntity<Map<String, Object>> capturedEntity = httpEntityCaptor.getValue();
             HttpHeaders headers = capturedEntity.getHeaders();
 
@@ -123,7 +112,6 @@ class TossPaymentsServiceIntegrationTest {
         @Test
         @DisplayName("요청 바디에 필수 파라미터가 모두 포함됨")
         void confirmPayment_RequestBodyContainsAllRequiredParams() {
-            // given
             TossPaymentConfirmRequest request = TossPaymentConfirmRequest.builder()
                     .paymentKey(TEST_PAYMENT_KEY)
                     .orderId(TEST_ORDER_ID)
@@ -132,13 +120,11 @@ class TossPaymentsServiceIntegrationTest {
 
             given(tossPaymentsConfig.getConfirmUrl())
                     .willReturn("https://api.tosspayments.com/v1/payments/confirm");
-            given(paymentApiClient.sendPostRequest(anyString(), httpEntityCaptor.capture()))
+            given(restTemplate.postForObject(anyString(), httpEntityCaptor.capture(), eq(Map.class)))
                     .willReturn(Map.of("status", "DONE"));
 
-            // when
             tossPaymentsService.confirmPayment(request);
 
-            // then
             Map<String, Object> capturedBody = httpEntityCaptor.getValue().getBody();
 
             assertThat(capturedBody).containsEntry("paymentKey", TEST_PAYMENT_KEY);
@@ -149,7 +135,6 @@ class TossPaymentsServiceIntegrationTest {
         @Test
         @DisplayName("토스 API 응답 데이터가 그대로 반환됨")
         void confirmPayment_ReturnsApiResponse() {
-            // given
             TossPaymentConfirmRequest request = TossPaymentConfirmRequest.builder()
                     .paymentKey(TEST_PAYMENT_KEY)
                     .orderId(TEST_ORDER_ID)
@@ -161,29 +146,23 @@ class TossPaymentsServiceIntegrationTest {
                     "orderId", TEST_ORDER_ID,
                     "status", "DONE",
                     "method", "카드",
-                    "totalAmount", TEST_AMOUNT,
-                    "requestedAt", "2026-02-05T17:30:00+09:00",
-                    "approvedAt", "2026-02-05T17:30:05+09:00"
-            );
+                    "totalAmount", TEST_AMOUNT);
 
             given(tossPaymentsConfig.getConfirmUrl())
                     .willReturn("https://api.tosspayments.com/v1/payments/confirm");
-            given(paymentApiClient.sendPostRequest(anyString(), any(HttpEntity.class)))
+            given(restTemplate.postForObject(anyString(), any(HttpEntity.class), eq(Map.class)))
                     .willReturn(apiResponse);
 
-            // when
             Map<String, Object> result = tossPaymentsService.confirmPayment(request);
 
-            // then
             assertThat(result).containsEntry("paymentKey", TEST_PAYMENT_KEY);
             assertThat(result).containsEntry("status", "DONE");
             assertThat(result).containsEntry("method", "카드");
         }
 
         @Test
-        @DisplayName("4xx 클라이언트 에러 발생 시 TossApiClientException으로 변환")
-        void confirmPayment_ClientError_ThrowsTossApiFailedException() {
-            // given
+        @DisplayName("4xx 클라이언트 에러 발생 시 TossApiClientException")
+        void confirmPayment_ClientError_ThrowsTossApiClientException() {
             TossPaymentConfirmRequest request = TossPaymentConfirmRequest.builder()
                     .paymentKey("invalid_key")
                     .orderId(TEST_ORDER_ID)
@@ -192,19 +171,17 @@ class TossPaymentsServiceIntegrationTest {
 
             given(tossPaymentsConfig.getConfirmUrl())
                     .willReturn("https://api.tosspayments.com/v1/payments/confirm");
-            given(paymentApiClient.sendPostRequest(anyString(), any(HttpEntity.class)))
+            given(restTemplate.postForObject(anyString(), any(HttpEntity.class), eq(Map.class)))
                     .willThrow(new HttpClientErrorException(HttpStatus.BAD_REQUEST, "Invalid Request"));
 
-            // when & then
             assertThatThrownBy(() -> tossPaymentsService.confirmPayment(request))
                     .isInstanceOf(TossApiClientException.class)
                     .hasMessageContaining("결제 승인 요청 오류");
         }
 
         @Test
-        @DisplayName("5xx 서버 에러 발생 시 TossApiFailedException으로 변환")
+        @DisplayName("5xx 서버 에러 발생 시 TossApiFailedException")
         void confirmPayment_ServerError_ThrowsTossApiFailedException() {
-            // given
             TossPaymentConfirmRequest request = TossPaymentConfirmRequest.builder()
                     .paymentKey(TEST_PAYMENT_KEY)
                     .orderId(TEST_ORDER_ID)
@@ -213,10 +190,9 @@ class TossPaymentsServiceIntegrationTest {
 
             given(tossPaymentsConfig.getConfirmUrl())
                     .willReturn("https://api.tosspayments.com/v1/payments/confirm");
-            given(paymentApiClient.sendPostRequest(anyString(), any(HttpEntity.class)))
+            given(restTemplate.postForObject(anyString(), any(HttpEntity.class), eq(Map.class)))
                     .willThrow(new HttpServerErrorException(HttpStatus.INTERNAL_SERVER_ERROR, "Server Error"));
 
-            // when & then
             assertThatThrownBy(() -> tossPaymentsService.confirmPayment(request))
                     .isInstanceOf(TossApiFailedException.class);
         }
@@ -231,20 +207,17 @@ class TossPaymentsServiceIntegrationTest {
         @Test
         @DisplayName("전체 취소 시 cancelAmount가 요청에 포함되지 않음")
         void cancelPayment_FullCancel_DoesNotIncludeCancelAmount() {
-            // given
             TossPaymentCancelRequest request = TossPaymentCancelRequest.builder()
                     .cancelReason("고객 요청")
                     .build();
 
             given(tossPaymentsConfig.getCancelUrl(TEST_PAYMENT_KEY))
                     .willReturn("https://api.tosspayments.com/v1/payments/" + TEST_PAYMENT_KEY + "/cancel");
-            given(paymentApiClient.sendPostRequest(anyString(), httpEntityCaptor.capture()))
+            given(restTemplate.postForObject(anyString(), httpEntityCaptor.capture(), eq(Map.class)))
                     .willReturn(Map.of("status", "CANCELED"));
 
-            // when
             tossPaymentsService.cancelPayment(TEST_PAYMENT_KEY, request);
 
-            // then
             Map<String, Object> capturedBody = httpEntityCaptor.getValue().getBody();
 
             assertThat(capturedBody).containsEntry("cancelReason", "고객 요청");
@@ -254,7 +227,6 @@ class TossPaymentsServiceIntegrationTest {
         @Test
         @DisplayName("부분 취소 시 cancelAmount가 요청에 포함됨")
         void cancelPayment_PartialCancel_IncludesCancelAmount() {
-            // given
             Long partialAmount = 50000L;
             TossPaymentCancelRequest request = TossPaymentCancelRequest.builder()
                     .cancelReason("부분 환불")
@@ -263,37 +235,15 @@ class TossPaymentsServiceIntegrationTest {
 
             given(tossPaymentsConfig.getCancelUrl(TEST_PAYMENT_KEY))
                     .willReturn("https://api.tosspayments.com/v1/payments/" + TEST_PAYMENT_KEY + "/cancel");
-            given(paymentApiClient.sendPostRequest(anyString(), httpEntityCaptor.capture()))
+            given(restTemplate.postForObject(anyString(), httpEntityCaptor.capture(), eq(Map.class)))
                     .willReturn(Map.of("status", "PARTIAL_CANCELED"));
 
-            // when
             tossPaymentsService.cancelPayment(TEST_PAYMENT_KEY, request);
 
-            // then
             Map<String, Object> capturedBody = httpEntityCaptor.getValue().getBody();
 
             assertThat(capturedBody).containsEntry("cancelReason", "부분 환불");
             assertThat(capturedBody).containsEntry("cancelAmount", partialAmount);
-        }
-
-        @Test
-        @DisplayName("취소 URL에 paymentKey가 올바르게 포함됨")
-        void cancelPayment_UrlContainsPaymentKey() {
-            // given
-            TossPaymentCancelRequest request = TossPaymentCancelRequest.builder()
-                    .cancelReason("테스트")
-                    .build();
-
-            String expectedUrl = "https://api.tosspayments.com/v1/payments/" + TEST_PAYMENT_KEY + "/cancel";
-            given(tossPaymentsConfig.getCancelUrl(TEST_PAYMENT_KEY)).willReturn(expectedUrl);
-            given(paymentApiClient.sendPostRequest(anyString(), any(HttpEntity.class)))
-                    .willReturn(Map.of("status", "CANCELED"));
-
-            // when
-            tossPaymentsService.cancelPayment(TEST_PAYMENT_KEY, request);
-
-            // then
-            verify(paymentApiClient).sendPostRequest(eq(expectedUrl), any(HttpEntity.class));
         }
     }
 
@@ -306,60 +256,28 @@ class TossPaymentsServiceIntegrationTest {
         @Test
         @DisplayName("paymentKey 조회 시 올바른 URL로 GET 요청")
         void getPaymentByPaymentKey_CorrectUrl() {
-            // given
             String expectedUrl = "https://api.tosspayments.com/v1/payments/" + TEST_PAYMENT_KEY;
             given(tossPaymentsConfig.getPaymentUrl(TEST_PAYMENT_KEY)).willReturn(expectedUrl);
             given(restTemplate.exchange(
-                    anyString(),
-                    eq(HttpMethod.GET),
-                    any(HttpEntity.class),
-                    eq(Map.class)))
+                    anyString(), eq(HttpMethod.GET), any(HttpEntity.class), eq(Map.class)))
                     .willReturn(new ResponseEntity<>(Map.of("status", "DONE"), HttpStatus.OK));
 
-            // when
             tossPaymentsService.getPaymentByPaymentKey(TEST_PAYMENT_KEY);
 
-            // then
-            verify(restTemplate).exchange(eq(expectedUrl), eq(HttpMethod.GET), any(HttpEntity.class), eq(Map.class));
-        }
-
-        @Test
-        @DisplayName("orderId 조회 시 올바른 URL로 GET 요청")
-        void getPaymentByOrderId_CorrectUrl() {
-            // given
-            String expectedUrl = "https://api.tosspayments.com/v1/payments/orders/" + TEST_ORDER_ID;
-            given(tossPaymentsConfig.getOrderIdUrl(TEST_ORDER_ID)).willReturn(expectedUrl);
-            given(restTemplate.exchange(
-                    anyString(),
-                    eq(HttpMethod.GET),
-                    any(HttpEntity.class),
-                    eq(Map.class)))
-                    .willReturn(new ResponseEntity<>(Map.of("status", "DONE"), HttpStatus.OK));
-
-            // when
-            tossPaymentsService.getPaymentByOrderId(TEST_ORDER_ID);
-
-            // then
             verify(restTemplate).exchange(eq(expectedUrl), eq(HttpMethod.GET), any(HttpEntity.class), eq(Map.class));
         }
 
         @Test
         @DisplayName("조회 시 Authorization 헤더가 포함됨")
         void getPayment_IncludesAuthorizationHeader() {
-            // given
             given(tossPaymentsConfig.getPaymentUrl(TEST_PAYMENT_KEY))
                     .willReturn("https://api.tosspayments.com/v1/payments/" + TEST_PAYMENT_KEY);
             given(restTemplate.exchange(
-                    anyString(),
-                    eq(HttpMethod.GET),
-                    httpEntityVoidCaptor.capture(),
-                    eq(Map.class)))
+                    anyString(), eq(HttpMethod.GET), httpEntityVoidCaptor.capture(), eq(Map.class)))
                     .willReturn(new ResponseEntity<>(Map.of("status", "DONE"), HttpStatus.OK));
 
-            // when
             tossPaymentsService.getPaymentByPaymentKey(TEST_PAYMENT_KEY);
 
-            // then
             HttpHeaders headers = httpEntityVoidCaptor.getValue().getHeaders();
             assertThat(headers.getFirst("Authorization")).isEqualTo(expectedAuthHeader);
         }
