@@ -80,11 +80,13 @@ public class OrderController {
     @GetMapping
     public ResponseEntity<List<OrderResponse>> getMyOrders(
             @RequestParam(required = false) Long testUserId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
             Authentication authentication) {
 
         Long userId = getUserId(testUserId, authentication);
-        log.info("주문 목록 조회 API 호출: userId={}", userId);
-        List<OrderResponse> orders = orderService.getMyOrders(userId);
+        log.info("주문 목록 조회 API 호출: userId={}, page={}, size={}", userId, page, size);
+        List<OrderResponse> orders = orderService.getMyOrders(userId, page, size);
         return ResponseEntity.ok(orders);
     }
 

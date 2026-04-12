@@ -186,7 +186,7 @@ export function orderReadFlow(data) {
   const userId = randomUserId();
 
   group('내 주문 목록', () => {
-    const res = http.get(`${ORDER_API}?testUserId=${userId}`);
+    const res = http.get(`${ORDER_API}?testUserId=${userId}&page=0&size=20`);
     orderListLatency.add(res.timings.duration);
 
     const ok = check(res, { '목록 조회 200': (r) => r.status === 200 });

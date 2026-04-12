@@ -21,6 +21,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 
 import com.homesweet.homesweetback.common.exception.OrderNotFoundException;
 import com.homesweet.homesweetback.domain.auth.entity.User;
@@ -384,15 +386,18 @@ class OrderServiceTest {
                     createTestOrder(1L, user, OrderStatus.PENDING),
                     createTestOrder(2L, user, OrderStatus.PAID)
             );
+            PageRequest pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
 
-            given(orderRepository.findByUserIdWithItemsAndProduct(userId)).willReturn(orders);
+            given(orderRepository.findIdsByUserId(userId, pageable)).willReturn(List.of(1L, 2L));
+            given(orderRepository.findByIdInWithItemsAndProduct(List.of(1L, 2L))).willReturn(orders);
 
             // when
-            List<OrderResponse> responses = orderService.getMyOrders(userId);
+            List<OrderResponse> responses = orderService.getMyOrders(userId, 0, 20);
 
             // then
             assertThat(responses).hasSize(2);
-            verify(orderRepository, times(1)).findByUserIdWithItemsAndProduct(userId);
+            verify(orderRepository, times(1)).findIdsByUserId(userId, pageable);
+            verify(orderRepository, times(1)).findByIdInWithItemsAndProduct(List.of(1L, 2L));
         }
 
         @Test
@@ -400,14 +405,17 @@ class OrderServiceTest {
         void getMyOrders_Success_EmptyList() {
             // given
             Long userId = 1L;
+            PageRequest pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
 
-            given(orderRepository.findByUserIdWithItemsAndProduct(userId)).willReturn(List.of());
+            given(orderRepository.findIdsByUserId(userId, pageable)).willReturn(List.of());
 
             // when
-            List<OrderResponse> responses = orderService.getMyOrders(userId);
+            List<OrderResponse> responses = orderService.getMyOrders(userId, 0, 20);
 
             // then
             assertThat(responses).isEmpty();
+            verify(orderRepository, times(1)).findIdsByUserId(userId, pageable);
+            verify(orderRepository, never()).findByIdInWithItemsAndProduct(any());
         }
     }
 
