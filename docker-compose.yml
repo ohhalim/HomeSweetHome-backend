@@ -1,6 +1,6 @@
 services:
   spring:
-      image: ohhalim/homesweet-commu:2.9
+    image: ohhalim/homesweet-commu:3
     container_name: homesweet-backend
     env_file:
       - .env
@@ -19,11 +19,11 @@ services:
     container_name: node_exporter
     restart: unless-stopped
     ports:
-    - "9100:9100"
+      - "9100:9100"
     command:
-      '--path.rootfs=/host'     # Docker 환경에서도 실제 호스트 자원 수집 가능하게 설정
+      - '--path.rootfs=/host'     # Docker 환경에서도 실제 호스트 자원 수집 가능하게 설정
     volumes:
-    - /:/host:ro
+      - /:/host:ro
 
   mysqld_exporter:
     image: prom/mysqld-exporter:latest
