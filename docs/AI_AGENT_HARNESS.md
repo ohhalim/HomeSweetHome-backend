@@ -10,6 +10,7 @@
 4. 마지막에 리뷰 모드로 다시 본다.
 
 자세한 repo 규칙은 루트의 `AGENTS.md`를 기준으로 한다.
+IntelliJ + Codex + Mac 기준 설치 절차는 `docs/INTELLIJ_CODEX_AGENT_SETUP.md`를 기준으로 한다.
 
 ## 바로 쓰는 프롬프트 템플릿
 
@@ -83,8 +84,15 @@ Done when:
 예시:
 
 ```sh
+./scripts/agent-review.sh
 ./scripts/agent-check.sh changed
 ./scripts/agent-check.sh quick
+```
+
+로컬 push hook을 설치하려면 한 번만 실행한다.
+
+```sh
+./scripts/install-agent-hooks.sh
 ```
 
 Redis-backed tests expect `127.0.0.1:6379` / `localhost:6379`.

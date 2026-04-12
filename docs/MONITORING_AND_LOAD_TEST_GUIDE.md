@@ -16,14 +16,16 @@ docker-compose --version
 ### 2. 애플리케이션 실행
 
 ```bash
-# 백엔드 애플리케이션 실행
-GOOGLE_CLIENT_ID=1091815838819-63ftv8b7ihgiqh62ru48v35b60voqh9v.apps.googleusercontent.com \
-GOOGLE_CLIENT_SECRET=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 \
-TOSS_PAYMENTS_SECRET_KEY=test_gsk_docs_OaPz8L5KdmQXkzRz3y47BMw6 \
+# 백엔드 애플리케이션 실행 (.env 파일에 환경변수 설정 후 실행)
+# 필요한 환경변수: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, TOSS_PAYMENTS_SECRET_KEY
+SPRING_PROFILES_ACTIVE=dev \
 ./gradlew bootRun
 
 # 또는 IntelliJ에서 Run (application.yml의 active profile이 dev로 설정되어 있어야 함)
 ```
+  
+백엔드는 같은 EC2 인스턴스에서 `8080`으로 실행되어 있어야 하며,  
+`curl http://localhost:8080/actuator/prometheus`가 200이어야 합니다.
 
 ---
 
@@ -37,30 +39,42 @@ docker-compose -f docker-compose.monitoring.yml up -d
 
 # 로그 확인
 docker-compose -f docker-compose.monitoring.yml logs -f
+
+# Grafana 기본 계정 변경 시
+GRAFANA_ADMIN_USER=<username> GRAFANA_ADMIN_PASSWORD=<password> docker-compose -f docker-compose.monitoring.yml up -d
 ```
+
+EC2 보안 그룹에서 다음 포트가 모니터링 PC IP에서 열려 있어야 합니다.
+- 8080: 백엔드 Actuator
+- 9090: Prometheus
+- 9100: Node Exporter
+- 3300, 3001: Grafana
 
 ### 2. 접속 확인
 
 - **Prometheus**: http://localhost:9090
   - Status → Targets에서 메트릭 수집 상태 확인
-  - `spring-actuator`, `node_exporter`, `mysqld_exporter` 모두 UP 상태여야 함
+  - `spring-actuator`, `node_exporter`가 UP 상태여야 함
+  - `spring-actuator`가 DOWN이면 백엔드가 안 띄워진 상태거나 `BACKEND_ACTUATOR_TARGET` 값이 틀린 상태입니다.
+  - 기본값은 `host.docker.internal:8080`이며, 원격 IP에서 실행 중이면 `prometheus/prometheus-local.yml`의 `spring-actuator` 타겟을 해당 IP:포트로 직접 수정하세요.
 
-- **Grafana**: http://localhost:3001
+- **Grafana**: http://localhost:3300 또는 http://localhost:3001
   - 초기 로그인: `admin` / `admin`
-  - 데이터 소스 추가: Configuration → Data Sources → Prometheus
-  - URL: `http://prometheus:9090`
+  - Prometheus 데이터소스가 시작 시 자동 등록됩니다.
+  - Prometheus URL: `http://prometheus:9090`
 
 ### 3. 대시보드 생성
 
-**추천 Grafana 대시보드 ID**:
+컨테이너가 올라오면 아래 ID의 공식 대시보드를 자동으로 가져와서 등록합니다.
+
 - **Spring Boot 2.1 System Monitor**: 11378
 - **JVM (Micrometer)**: 4701
 - **MySQL Overview**: 7362
 
-Import 방법:
-1. Grafana → Create → Import
-2. Dashboard ID 입력 후 Load
-3. Prometheus 데이터 소스 선택
+다시 넣고 싶을 때(수동 재적용):
+```bash
+GRAFANA_ADMIN_USER=admin GRAFANA_ADMIN_PASSWORD=admin docker compose -f docker-compose.monitoring.yml run --rm grafana-dashboard-bootstrap
+```
 
 ---
 
