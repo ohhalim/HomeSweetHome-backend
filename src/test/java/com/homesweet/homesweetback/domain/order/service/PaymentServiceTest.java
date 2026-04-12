@@ -27,6 +27,7 @@ import com.homesweet.homesweetback.common.exception.PaymentMismatchException;
 import com.homesweet.homesweetback.domain.auth.entity.User;
 import com.homesweet.homesweetback.domain.auth.entity.UserRole;
 import com.homesweet.homesweetback.domain.order.dto.PaymentResponse;
+import com.homesweet.homesweetback.domain.order.dto.TossPaymentCancelRequest;
 import com.homesweet.homesweetback.domain.order.dto.TossPaymentConfirmRequest;
 import com.homesweet.homesweetback.domain.order.entity.Order;
 import com.homesweet.homesweetback.domain.order.entity.Payment;
@@ -92,6 +93,17 @@ class PaymentServiceTest {
                 .build();
     }
 
+    private Payment createTestPaymentWithStatus(Long paymentId, Order order, String paymentKey, PaymentStatus status) {
+        return Payment.builder()
+                .id(paymentId)
+                .order(order)
+                .paymentKey(paymentKey)
+                .tossOrderId(order.getOrderNumber())
+                .status(status)
+                .amount(order.getTotalAmount())
+                .build();
+    }
+
     // ===== 결제 승인 테스트 =====
 
     @Nested
@@ -148,6 +160,30 @@ class PaymentServiceTest {
 
             assertThat(response).isNotNull();
             assertThat(response.getPaymentId()).isEqualTo(existingPayment.getId());
+            verify(tossPaymentsService, never()).confirmPayment(any());
+        }
+
+        @Test
+        @DisplayName("결제 승인 중복 요청 실패 - 기존 결제 권한 없음")
+        void confirmPayment_Idempotent_Fail_NotOwner() {
+            Long userId = 1L;
+            String orderNumber = "TEST-ORDER-001";
+            Long amount = 100000L;
+            String paymentKey = "test_payment_key_123";
+
+            Order order = mock(Order.class);
+            given(order.getOrderNumber()).willReturn(orderNumber);
+            given(order.getTotalAmount()).willReturn(amount);
+            given(order.isOwner(userId)).willReturn(false);
+
+            Payment existingPayment = createTestPayment(10L, order, paymentKey);
+            TossPaymentConfirmRequest request = new TossPaymentConfirmRequest(paymentKey, orderNumber, amount);
+
+            given(paymentRepository.findByPaymentKey(paymentKey)).willReturn(Optional.of(existingPayment));
+
+            assertThatThrownBy(() -> paymentService.confirmPayment(userId, request))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("본인의 주문만 결제할 수 있습니다.");
             verify(tossPaymentsService, never()).confirmPayment(any());
         }
 
@@ -240,6 +276,113 @@ class PaymentServiceTest {
             assertThatThrownBy(() -> paymentService.getPayment(userId, paymentKey))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("본인의 결제만 조회할 수 있습니다");
+        }
+    }
+
+    // ===== 결제 취소 테스트 =====
+
+    @Nested
+    @DisplayName("결제 취소 테스트")
+    class CancelPaymentTest {
+
+        @Test
+        @DisplayName("결제 전체 취소 성공")
+        void cancelPayment_FullCancel_Success() {
+            Long userId = 1L;
+            String paymentKey = "test_payment_key_123";
+
+            User user = createTestUser(userId);
+            Order order = createTestOrder(1L, user, "TEST-ORDER-001", 100000L);
+            Payment payment = createTestPaymentWithStatus(10L, order, paymentKey, PaymentStatus.DONE);
+
+            TossPaymentCancelRequest request = TossPaymentCancelRequest.builder()
+                    .cancelReason("고객 요청")
+                    .build();
+
+            given(paymentRepository.findByPaymentKeyWithOrderItemsForUpdate(paymentKey))
+                    .willReturn(Optional.of(payment));
+            given(tossPaymentsService.cancelPayment(paymentKey, request))
+                    .willReturn(Map.of("paymentKey", paymentKey, "status", "CANCELED"));
+
+            PaymentResponse response = paymentService.cancelPayment(userId, paymentKey, request);
+
+            assertThat(response).isNotNull();
+            assertThat(response.getPaymentId()).isEqualTo(payment.getId());
+            assertThat(response.getStatus()).isEqualTo(PaymentStatus.CANCELLED);
+            verify(order).cancel();
+            verify(tossPaymentsService, times(1)).cancelPayment(paymentKey, request);
+        }
+
+        @Test
+        @DisplayName("결제 부분 취소 성공")
+        void cancelPayment_PartialCancel_Success() {
+            Long userId = 1L;
+            String paymentKey = "test_payment_key_123";
+
+            User user = createTestUser(userId);
+            Order order = createTestOrder(1L, user, "TEST-ORDER-001", 100000L);
+            Payment payment = createTestPaymentWithStatus(11L, order, paymentKey, PaymentStatus.DONE);
+
+            TossPaymentCancelRequest request = TossPaymentCancelRequest.builder()
+                    .cancelReason("부분 환불")
+                    .cancelAmount(30000L)
+                    .build();
+
+            given(paymentRepository.findByPaymentKeyWithOrderItemsForUpdate(paymentKey))
+                    .willReturn(Optional.of(payment));
+            given(tossPaymentsService.cancelPayment(paymentKey, request))
+                    .willReturn(Map.of("paymentKey", paymentKey, "status", "PARTIAL_CANCELED"));
+
+            PaymentResponse response = paymentService.cancelPayment(userId, paymentKey, request);
+
+            assertThat(response).isNotNull();
+            assertThat(response.getPaymentId()).isEqualTo(payment.getId());
+            assertThat(response.getStatus()).isEqualTo(PaymentStatus.PARTIAL_CANCELED);
+            verify(order, never()).cancel();
+            verify(tossPaymentsService, times(1)).cancelPayment(paymentKey, request);
+        }
+
+        @Test
+        @DisplayName("결제 취소 실패 - 결제 없음")
+        void cancelPayment_Fail_NotFound() {
+            Long userId = 1L;
+            String paymentKey = "missing_payment_key";
+
+            TossPaymentCancelRequest request = TossPaymentCancelRequest.builder()
+                    .cancelReason("고객 요청")
+                    .build();
+
+            given(paymentRepository.findByPaymentKeyWithOrderItemsForUpdate(paymentKey))
+                    .willReturn(Optional.empty());
+
+            assertThatThrownBy(() -> paymentService.cancelPayment(userId, paymentKey, request))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("결제 정보를 찾을 수 없습니다.");
+        }
+
+        @Test
+        @DisplayName("결제 취소 실패 - 권한 없음")
+        void cancelPayment_Fail_NotOwner() {
+            Long userId = 1L;
+            String paymentKey = "test_payment_key_123";
+
+            User owner = createTestUser(2L);
+            Order order = createTestOrder(1L, owner, "TEST-ORDER-001", 100000L);
+            given(order.isOwner(userId)).willReturn(false);
+
+            Payment payment = createTestPaymentWithStatus(12L, order, paymentKey, PaymentStatus.DONE);
+
+            TossPaymentCancelRequest request = TossPaymentCancelRequest.builder()
+                    .cancelReason("고객 요청")
+                    .build();
+
+            given(paymentRepository.findByPaymentKeyWithOrderItemsForUpdate(paymentKey))
+                    .willReturn(Optional.of(payment));
+
+            assertThatThrownBy(() -> paymentService.cancelPayment(userId, paymentKey, request))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("본인의 결제만 취소할 수 있습니다.");
+            verify(tossPaymentsService, never()).cancelPayment(any(), any());
         }
     }
 }
