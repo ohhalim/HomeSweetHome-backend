@@ -1,6 +1,13 @@
 apiVersion: 1
 
 datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: true
+
   - name: InfluxDB
     type: influxdb
     access: proxy
@@ -12,6 +19,5 @@ datasources:
     jsonData:
       httpMode: GET
       version: InfluxQL
-    isDefault: true
+    isDefault: false
     editable: true
-

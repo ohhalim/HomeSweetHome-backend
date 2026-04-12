@@ -114,6 +114,7 @@ changed_tests() {
   {
     git diff --name-only --diff-filter=ACMRT -- 'src/test/java/**/*Test.java' 2>/dev/null
     git diff --name-only --diff-filter=ACMRT --cached -- 'src/test/java/**/*Test.java' 2>/dev/null
+    git ls-files --others --exclude-standard -- 'src/test/java' 2>/dev/null | grep 'Test\.java$' || true
   } | sort -u
 }
 

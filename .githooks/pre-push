@@ -1,0 +1,16 @@
+#!/usr/bin/env sh
+
+set -eu
+
+if [ "${SKIP_AGENT_HOOKS:-0}" = "1" ]; then
+  echo "pre-push: skipped because SKIP_AGENT_HOOKS=1"
+  exit 0
+fi
+
+MODE="${AGENT_HOOK_MODE:-changed}"
+
+echo "pre-push: running agent review"
+./scripts/agent-review.sh
+
+echo "pre-push: running agent check (${MODE})"
+./scripts/agent-check.sh "$MODE"

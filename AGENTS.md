@@ -20,7 +20,10 @@ Important implementation themes:
 - `src/main/java/com/homesweet/homesweetback/domain/product/**`: product, cart, review, category.
 - `src/test/java/**`: unit and integration tests.
 - `scripts/agent-check.sh`: default verification harness.
+- `scripts/agent-review.sh`: deterministic local review guard.
+- `.githooks/pre-push`: local push gate installed by `scripts/install-agent-hooks.sh`.
 - `docs/AI_AGENT_HARNESS.md`: prompt patterns for analysis, implementation, and review.
+- `docs/INTELLIJ_CODEX_AGENT_SETUP.md`: IntelliJ + Codex + Mac setup guide.
 
 ## Working Rules
 
@@ -78,6 +81,18 @@ Available modes:
 ./scripts/agent-check.sh quick    # Gradle test with test profile
 ./scripts/agent-check.sh full     # clean test with test profile
 ./scripts/agent-check.sh build    # clean build with test profile
+```
+
+Run deterministic local review before PR or push:
+
+```sh
+./scripts/agent-review.sh
+```
+
+Install repo-local hooks once per clone:
+
+```sh
+./scripts/install-agent-hooks.sh
 ```
 
 Direct Gradle fallback:

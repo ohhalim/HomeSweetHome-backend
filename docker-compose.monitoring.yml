@@ -1,34 +1,73 @@
 services:
   prometheus:
     image: prom/prometheus:latest
-    container_name: prometheus-local
+    container_name: homesweet-prometheus
     restart: unless-stopped
     ports:
       - "9090:9090"
     volumes:
-      - ./prometheus/prometheus-local.yml:/etc/prometheus/prometheus.yml
+      - ./prometheus/prometheus-local.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
   grafana:
     image: grafana/grafana:latest
-    container_name: grafana-local
+    container_name: homesweet-grafana
     restart: unless-stopped
     ports:
-      - "3001:3000"  # 포트 3000은 프론트엔드가 사용 중이므로 3001 사용
+      - "3300:3000"
+      - "3001:3000"  # 포트 3000은 프론트엔드 충돌을 피하기 위해 3001 사용
     volumes:
       - grafana-data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
       - GF_USERS_ALLOW_SIGN_UP=false
     depends_on:
       - prometheus
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
+  grafana-dashboard-bootstrap:
+    image: alpine:3.20
+    container_name: homesweet-grafana-dashboard-bootstrap
+    restart: "no"
+    environment:
+      - GRAFANA_URL=http://grafana:3000
+      - GRAFANA_DASHBOARD_IDS=11378,4701,7362
+      - GRAFANA_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GRAFANA_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GRAFANA_DASHBOARD_DATASOURCE=Prometheus
+    volumes:
+      - ./scripts/bootstrap-grafana-dashboards.sh:/usr/local/bin/bootstrap-grafana-dashboards.sh:ro
+    depends_on:
+      - grafana
+    command: >
+      /bin/sh -c 'apk add --no-cache curl jq >/dev/null && /usr/local/bin/bootstrap-grafana-dashboards.sh'
+
+  node_exporter:
+    image: prom/node-exporter:latest
+    container_name: homesweet-node-exporter
+    restart: unless-stopped
+    ports:
+      - "9100:9100"
+    pid: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/host'
+      - '--collector.filesystem.mount-points-exclude=^/(dev|proc|sys|run|var/lib/docker/.+|var/lib/containerd/.+)($$|/)'
+
 volumes:
   grafana-data:
+  prometheus-data:

@@ -11,7 +11,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -34,6 +34,28 @@ public class OrderController {
     private final OrderService orderService;
 
     /**
+     * 인증 정보에서 userId를 추출하는 헬퍼 메서드
+     * testUserId 파라미터가 있으면 우선 사용 (k6 부하테스트용)
+     */
+    private Long getUserId(Long testUserId, Authentication authentication) {
+        if (testUserId != null) {
+            return testUserId;
+        }
+        if (authentication == null || !authentication.isAuthenticated()
+                || authentication.getPrincipal() instanceof String) {
+            log.warn("인증되지 않은 요청입니다. 테스트용 ID(1L)를 사용합니다.");
+            return 1L;
+        }
+        try {
+            OAuth2UserPrincipal principal = (OAuth2UserPrincipal) authentication.getPrincipal();
+            return principal.getUserId();
+        } catch (ClassCastException e) {
+            log.error("Authentication Casting Error: {}", authentication.getPrincipal());
+            return 1L;
+        }
+    }
+
+    /**
      * 주문 생성 API
      * 장바구니에서 선택한 상품들로 주문을 생성합니다.
      * 생성된 주문의 orderNumber, totalAmount로 토스페이먼츠 결제창을 호출하세요.
@@ -41,11 +63,13 @@ public class OrderController {
     @Operation(summary = "주문 생성", description = "장바구니에서 주문 생성. 결제 전 단계.")
     @PostMapping
     public ResponseEntity<OrderResponse> createOrder(
-            @AuthenticationPrincipal OAuth2UserPrincipal principal,
-            @Valid @RequestBody CreateOrderRequest request) {
+            @RequestParam(required = false) Long testUserId,
+            @Valid @RequestBody CreateOrderRequest request,
+            Authentication authentication) {
 
-        log.info("주문 생성 API 호출: userId={}", principal.getUserId());
-        OrderResponse response = orderService.createFromCart(principal.getUserId(), request);
+        Long userId = getUserId(testUserId, authentication);
+        log.info("주문 생성 API 호출: userId={}", userId);
+        OrderResponse response = orderService.createFromCart(userId, request);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
@@ -55,10 +79,12 @@ public class OrderController {
     @Operation(summary = "내 주문 목록", description = "로그인한 사용자의 주문 목록 조회")
     @GetMapping
     public ResponseEntity<List<OrderResponse>> getMyOrders(
-            @AuthenticationPrincipal OAuth2UserPrincipal principal) {
+            @RequestParam(required = false) Long testUserId,
+            Authentication authentication) {
 
-        log.info("주문 목록 조회 API 호출: userId={}", principal.getUserId());
-        List<OrderResponse> orders = orderService.getMyOrders(principal.getUserId());
+        Long userId = getUserId(testUserId, authentication);
+        log.info("주문 목록 조회 API 호출: userId={}", userId);
+        List<OrderResponse> orders = orderService.getMyOrders(userId);
         return ResponseEntity.ok(orders);
     }
 
@@ -68,11 +94,13 @@ public class OrderController {
     @Operation(summary = "주문 상세 조회", description = "주문 ID로 상세 정보 조회")
     @GetMapping("/{orderId}")
     public ResponseEntity<OrderResponse> getOrder(
-            @AuthenticationPrincipal OAuth2UserPrincipal principal,
-            @PathVariable Long orderId) {
+            @RequestParam(required = false) Long testUserId,
+            @PathVariable Long orderId,
+            Authentication authentication) {
 
-        log.info("주문 상세 조회 API 호출: userId={}, orderId={}", principal.getUserId(), orderId);
-        OrderResponse response = orderService.getOrder(orderId, principal.getUserId());
+        Long userId = getUserId(testUserId, authentication);
+        log.info("주문 상세 조회 API 호출: userId={}, orderId={}", userId, orderId);
+        OrderResponse response = orderService.getOrder(orderId, userId);
         return ResponseEntity.ok(response);
     }
 
@@ -83,11 +111,13 @@ public class OrderController {
     @Operation(summary = "주문 취소", description = "결제 전 주문 취소 (PENDING 상태에서만 가능)")
     @DeleteMapping("/{orderId}")
     public ResponseEntity<Void> cancelOrder(
-            @AuthenticationPrincipal OAuth2UserPrincipal principal,
-            @PathVariable Long orderId) {
+            @RequestParam(required = false) Long testUserId,
+            @PathVariable Long orderId,
+            Authentication authentication) {
 
-        log.info("주문 취소 API 호출: userId={}, orderId={}", principal.getUserId(), orderId);
-        orderService.cancelOrder(orderId, principal.getUserId());
+        Long userId = getUserId(testUserId, authentication);
+        log.info("주문 취소 API 호출: userId={}, orderId={}", userId, orderId);
+        orderService.cancelOrder(orderId, userId);
         return ResponseEntity.noContent().build();
     }
 }

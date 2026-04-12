@@ -53,6 +53,9 @@ public class PaymentServiceImpl implements PaymentService {
         // 1. 이미 결제 완료된 건인지 확인 (멱등성 보장)
         Optional<Payment> existingPayment = paymentRepository.findByPaymentKey(request.getPaymentKey());
         if (existingPayment.isPresent()) {
+            if (!existingPayment.get().getOrder().isOwner(userId)) {
+                throw new IllegalArgumentException("본인의 주문만 결제할 수 있습니다.");
+            }
             log.info("이미 처리된 결제: paymentKey={}", request.getPaymentKey());
             return PaymentResponse.from(existingPayment.get());
         }
