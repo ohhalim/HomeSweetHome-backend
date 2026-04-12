@@ -93,7 +93,8 @@ public class SecurityConfig {
                                                                 "/api/v1/products/{productId}",
                                                                 "/api/v1/products/previews",
                                                                 "/ws",
-                                                                "/api/v1/community/posts",
+                                                                "/api/v1/community/**",
+                                                                "/api/v1/orders/**",
                                                                 "/api/v1/payments/**"
 
                                                 ).permitAll()
