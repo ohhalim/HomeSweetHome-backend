@@ -41,6 +41,11 @@ out/
 node_modules/
 .venv/
 
+### Agent Artifacts ###
+.graphify*
+graphify-out/
+**/graphify-out/
+
 ### Load Test Artifacts ###
 results.json
 summary.json
