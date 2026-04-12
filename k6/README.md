@@ -29,11 +29,14 @@ k6 run --vus 1 --duration 10s k6/community-load-test.js
 
 ### 주문/결제 부하테스트
 ```bash
-# JWT 토큰 포함 실행
-k6 run -e AUTH_TOKEN=<your_jwt_token> k6/order-payment-load-test.js
-
-# 토큰 없이 실행 (401 에러 예상, 서버 응답 확인용)
+# 기본 실행 (토큰 불필요, testUserId 파라미터 사용)
 k6 run k6/order-payment-load-test.js
+
+# 서버 주소 변경
+k6 run -e BASE_URL=http://localhost:8080 k6/order-payment-load-test.js
+
+# 간단 스모크 테스트
+k6 run --vus 1 --duration 10s k6/order-payment-load-test.js
 ```
 
 ## 시나리오 구성
@@ -57,3 +60,8 @@ k6 run k6/order-payment-load-test.js
 | p95 응답시간 | < 500ms | < 1000ms |
 | p99 응답시간 | < 1000ms | < 2000ms |
 | 에러율 | < 5% | < 10% |
+
+## 인증 방식
+
+모든 k6 테스트는 `testUserId` 쿼리 파라미터를 사용합니다.
+JWT 토큰 없이 로컬에서 바로 실행 가능합니다.

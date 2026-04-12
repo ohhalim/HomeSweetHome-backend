@@ -10,9 +10,6 @@ const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080';
 const ORDER_API = `${BASE_URL}/api/v1/orders`;
 const PAYMENT_API = `${BASE_URL}/api/v1/payments`;
 
-// 인증 토큰 (로그인 후 발급받은 JWT)
-const AUTH_TOKEN = __ENV.AUTH_TOKEN || '';
-
 // 커스텀 메트릭
 const errorRate = new Rate('errors');
 const orderCreateLatency = new Trend('order_create_latency', true);
@@ -63,11 +60,11 @@ export const options = {
 // 헬퍼
 // ============================================================
 
-function authHeaders() {
-  return {
-    'Content-Type': 'application/json',
-    Authorization: AUTH_TOKEN ? `Bearer ${AUTH_TOKEN}` : '',
-  };
+const headers = { 'Content-Type': 'application/json' };
+
+// 테스트용 유저 ID (DB에 존재하는 값)
+function randomUserId() {
+  return Math.floor(Math.random() * 10) + 1;
 }
 
 // 테스트용 SKU ID (DB에 존재하는 값으로 수정)
@@ -82,7 +79,7 @@ function randomSkuId() {
 // ============================================================
 
 export function checkoutFlow() {
-  const hdrs = authHeaders();
+  const userId = randomUserId();
   let orderId = null;
   let orderNumber = null;
   let totalAmount = null;
@@ -100,7 +97,7 @@ export function checkoutFlow() {
       shippingRequest: '문 앞에 놓아주세요',
     });
 
-    const res = http.post(ORDER_API, payload, { headers: hdrs });
+    const res = http.post(`${ORDER_API}?testUserId=${userId}`, payload, { headers });
     orderCreateLatency.add(res.timings.duration);
 
     const ok = check(res, {
@@ -132,7 +129,7 @@ export function checkoutFlow() {
       amount: totalAmount,
     });
 
-    const res = http.post(`${PAYMENT_API}/confirm`, payload, { headers: hdrs });
+    const res = http.post(`${PAYMENT_API}/confirm?testUserId=${userId}`, payload, { headers });
     paymentConfirmLatency.add(res.timings.duration);
 
     const ok = check(res, {
@@ -145,7 +142,7 @@ export function checkoutFlow() {
 
   // 3. 주문 상세 조회
   group('주문 상세 조회', () => {
-    const res = http.get(`${ORDER_API}/${orderId}`, { headers: hdrs });
+    const res = http.get(`${ORDER_API}/${orderId}?testUserId=${userId}`);
     orderDetailLatency.add(res.timings.duration);
 
     check(res, {
@@ -165,10 +162,10 @@ export function checkoutFlow() {
 // ============================================================
 
 export function orderReadFlow() {
-  const hdrs = authHeaders();
+  const userId = randomUserId();
 
   group('내 주문 목록', () => {
-    const res = http.get(ORDER_API, { headers: hdrs });
+    const res = http.get(`${ORDER_API}?testUserId=${userId}`);
     orderListLatency.add(res.timings.duration);
 
     const ok = check(res, {

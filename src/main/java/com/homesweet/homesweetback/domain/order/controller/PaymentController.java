@@ -12,7 +12,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
@@ -37,19 +37,43 @@ public class PaymentController {
     private final TossPaymentsService tossPaymentsService;
 
     /**
+     * 인증 정보에서 userId를 추출하는 헬퍼 메서드
+     * testUserId 파라미터가 있으면 우선 사용 (k6 부하테스트용)
+     */
+    private Long getUserId(Long testUserId, Authentication authentication) {
+        if (testUserId != null) {
+            return testUserId;
+        }
+        if (authentication == null || !authentication.isAuthenticated()
+                || authentication.getPrincipal() instanceof String) {
+            log.warn("인증되지 않은 요청입니다. 테스트용 ID(1L)를 사용합니다.");
+            return 1L;
+        }
+        try {
+            OAuth2UserPrincipal principal = (OAuth2UserPrincipal) authentication.getPrincipal();
+            return principal.getUserId();
+        } catch (ClassCastException e) {
+            log.error("Authentication Casting Error: {}", authentication.getPrincipal());
+            return 1L;
+        }
+    }
+
+    /**
      * 결제 승인 API
      * 토스 결제창 완료 후 successUrl에서 받은 paymentKey, orderId, amount로 결제 승인
      */
     @Operation(summary = "결제 승인", description = "토스페이먼츠 결제창 완료 후 최종 결제 승인")
     @PostMapping("/confirm")
     public ResponseEntity<PaymentResponse> confirmPayment(
-            @AuthenticationPrincipal OAuth2UserPrincipal principal,
-            @Valid @RequestBody TossPaymentConfirmRequest request) {
+            @RequestParam(required = false) Long testUserId,
+            @Valid @RequestBody TossPaymentConfirmRequest request,
+            Authentication authentication) {
 
+        Long userId = getUserId(testUserId, authentication);
         log.info("결제 승인 API 호출: userId={}, orderId={}, amount={}",
-                principal.getUserId(), request.getOrderId(), request.getAmount());
+                userId, request.getOrderId(), request.getAmount());
 
-        PaymentResponse response = paymentService.confirmPayment(principal.getUserId(), request);
+        PaymentResponse response = paymentService.confirmPayment(userId, request);
         return ResponseEntity.ok(response);
     }
 
@@ -59,13 +83,15 @@ public class PaymentController {
     @Operation(summary = "결제 취소", description = "결제 완료된 주문의 결제 취소")
     @PostMapping("/{paymentKey}/cancel")
      public ResponseEntity<PaymentResponse> cancelPayment(
-            @AuthenticationPrincipal OAuth2UserPrincipal principal,
+            @RequestParam(required = false) Long testUserId,
             @PathVariable String paymentKey,
-            @Valid @RequestBody TossPaymentCancelRequest request) {
+            @Valid @RequestBody TossPaymentCancelRequest request,
+            Authentication authentication) {
 
-        log.info("결제 취소 API 호출: userId={}, paymentKey={}", principal.getUserId(), paymentKey);
+        Long userId = getUserId(testUserId, authentication);
+        log.info("결제 취소 API 호출: userId={}, paymentKey={}", userId, paymentKey);
 
-        PaymentResponse response = paymentService.cancelPayment(principal.getUserId(), paymentKey, request);
+        PaymentResponse response = paymentService.cancelPayment(userId, paymentKey, request);
         return ResponseEntity.ok(response);
     }
 
@@ -75,12 +101,14 @@ public class PaymentController {
     @Operation(summary = "결제 조회", description = "paymentKey로 결제 정보 조회")
     @GetMapping("/{paymentKey}")
     public ResponseEntity<PaymentResponse> getPayment(
-            @AuthenticationPrincipal OAuth2UserPrincipal principal,
-            @PathVariable String paymentKey) {
+            @RequestParam(required = false) Long testUserId,
+            @PathVariable String paymentKey,
+            Authentication authentication) {
 
-        log.info("결제 조회 API 호출: userId={}, paymentKey={}", principal.getUserId(), paymentKey);
+        Long userId = getUserId(testUserId, authentication);
+        log.info("결제 조회 API 호출: userId={}, paymentKey={}", userId, paymentKey);
 
-        PaymentResponse response = paymentService.getPayment(principal.getUserId(), paymentKey);
+        PaymentResponse response = paymentService.getPayment(userId, paymentKey);
         return ResponseEntity.ok(response);
     }
 
