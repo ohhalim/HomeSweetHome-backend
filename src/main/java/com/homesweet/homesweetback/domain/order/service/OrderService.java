@@ -33,9 +33,11 @@ public interface OrderService {
      * 내 주문 목록 조회
      *
      * @param userId 사용자 ID
+     * @param page 페이지 번호
+     * @param size 페이지 크기
      * @return 주문 목록
      */
-    List<OrderResponse> getMyOrders(Long userId);
+    List<OrderResponse> getMyOrders(Long userId, int page, int size);
 
     /**
      * 주문 취소 (결제 전 상태에서만 가능)

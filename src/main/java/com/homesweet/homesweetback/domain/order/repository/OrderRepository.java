@@ -34,6 +34,18 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
             "ORDER BY o.createdAt DESC")
     List<Order> findByUserIdWithItemsAndProduct(@Param("userId") Long userId);
 
+    @Query("SELECT o.id FROM Order o " +
+            "WHERE o.user.id = :userId " +
+            "ORDER BY o.createdAt DESC")
+    List<Long> findIdsByUserId(@Param("userId") Long userId, Pageable pageable);
+
+    @Query("SELECT DISTINCT o FROM Order o " +
+            "LEFT JOIN FETCH o.orderItems oi " +
+            "LEFT JOIN FETCH oi.sku " +
+            "WHERE o.id IN :orderIds " +
+            "ORDER BY o.createdAt DESC")
+    List<Order> findByIdInWithItemsAndProduct(@Param("orderIds") List<Long> orderIds);
+
     @Query("SELECT DISTINCT o FROM Order o " +
             "LEFT JOIN FETCH o.orderItems oi " +
             "LEFT JOIN FETCH oi.sku " +

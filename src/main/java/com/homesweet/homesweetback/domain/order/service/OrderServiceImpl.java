@@ -17,6 +17,9 @@ import com.homesweet.homesweetback.domain.product.product.command.repository.jpa
 import com.homesweet.homesweetback.domain.product.product.command.repository.jpa.entity.SkuEntity;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -43,6 +46,8 @@ public class OrderServiceImpl implements OrderService {
     private static final int RECIPIENT_PHONE_MAX_LENGTH = 30;
     private static final int SHIPPING_ADDRESS_MAX_LENGTH = 500;
     private static final int SHIPPING_REQUEST_MAX_LENGTH = 500;
+    private static final int DEFAULT_ORDER_LIST_SIZE = 20;
+    private static final int MAX_ORDER_LIST_SIZE = 100;
 
     private final OrderRepository orderRepository;
     private final CartJPARepository cartJPARepository;
@@ -130,8 +135,18 @@ public class OrderServiceImpl implements OrderService {
      * 내 주문 목록 조회
      */
     @Override
-    public List<OrderResponse> getMyOrders(Long userId) {
-        List<Order> orders = orderRepository.findByUserIdWithItemsAndProduct(userId);
+    public List<OrderResponse> getMyOrders(Long userId, int page, int size) {
+        Pageable pageable = PageRequest.of(
+                Math.max(page, 0),
+                Math.min(Math.max(size, 1), MAX_ORDER_LIST_SIZE),
+                Sort.by(Sort.Direction.DESC, "createdAt"));
+
+        List<Long> orderIds = orderRepository.findIdsByUserId(userId, pageable);
+        if (orderIds.isEmpty()) {
+            return List.of();
+        }
+
+        List<Order> orders = orderRepository.findByIdInWithItemsAndProduct(orderIds);
         return orders.stream()
                 .map(OrderResponse::from)
                 .toList();
