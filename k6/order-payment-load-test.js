@@ -14,6 +14,10 @@ import { Rate, Trend } from 'k6/metrics';
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080';
 const ORDER_API = `${BASE_URL}/api/v1/orders`;
 const PRODUCT_API = `${BASE_URL}/api/v1/products`;
+const ORDER_CHECKOUT_WARMUP_VUS = Number(__ENV.ORDER_CHECKOUT_WARMUP_VUS || 20);
+const ORDER_CHECKOUT_PEAK_VUS = Number(__ENV.ORDER_CHECKOUT_PEAK_VUS || 60);
+const ORDER_READ_WARMUP_VUS = Number(__ENV.ORDER_READ_WARMUP_VUS || 40);
+const ORDER_READ_PEAK_VUS = Number(__ENV.ORDER_READ_PEAK_VUS || 120);
 
 // 커스텀 메트릭
 const errorRate = new Rate('errors');
@@ -33,9 +37,9 @@ export const options = {
       executor: 'ramping-vus',
       startVUs: 0,
       stages: [
-        { duration: '30s', target: 5 },
-        { duration: '1m', target: 15 },
-        { duration: '2m', target: 15 },
+        { duration: '30s', target: ORDER_CHECKOUT_WARMUP_VUS },
+        { duration: '1m', target: ORDER_CHECKOUT_PEAK_VUS },
+        { duration: '2m', target: ORDER_CHECKOUT_PEAK_VUS },
         { duration: '30s', target: 0 },
       ],
       exec: 'checkoutFlow',
@@ -45,9 +49,9 @@ export const options = {
       executor: 'ramping-vus',
       startVUs: 0,
       stages: [
-        { duration: '30s', target: 10 },
-        { duration: '1m', target: 30 },
-        { duration: '2m', target: 30 },
+        { duration: '30s', target: ORDER_READ_WARMUP_VUS },
+        { duration: '1m', target: ORDER_READ_PEAK_VUS },
+        { duration: '2m', target: ORDER_READ_PEAK_VUS },
         { duration: '30s', target: 0 },
       ],
       exec: 'orderReadFlow',

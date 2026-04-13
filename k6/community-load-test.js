@@ -9,6 +9,10 @@ import { SharedArray } from 'k6/data';
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080';
 const API = `${BASE_URL}/api/v1/community`;
+const COMMUNITY_READ_WARMUP_VUS = Number(__ENV.COMMUNITY_READ_WARMUP_VUS || 80);
+const COMMUNITY_READ_PEAK_VUS = Number(__ENV.COMMUNITY_READ_PEAK_VUS || 200);
+const COMMUNITY_WRITE_WARMUP_VUS = Number(__ENV.COMMUNITY_WRITE_WARMUP_VUS || 20);
+const COMMUNITY_WRITE_PEAK_VUS = Number(__ENV.COMMUNITY_WRITE_PEAK_VUS || 40);
 
 // 커스텀 메트릭
 const errorRate = new Rate('errors');
@@ -28,9 +32,9 @@ export const options = {
       executor: 'ramping-vus',
       startVUs: 0,
       stages: [
-        { duration: '30s', target: 20 },  // 웜업
-        { duration: '1m', target: 50 },   // 부하 증가
-        { duration: '2m', target: 50 },   // 유지
+        { duration: '30s', target: COMMUNITY_READ_WARMUP_VUS },  // 웜업
+        { duration: '1m', target: COMMUNITY_READ_PEAK_VUS },     // 부하 증가
+        { duration: '2m', target: COMMUNITY_READ_PEAK_VUS },     // 유지
         { duration: '30s', target: 0 },   // 정리
       ],
       exec: 'readScenario',
@@ -40,9 +44,9 @@ export const options = {
       executor: 'ramping-vus',
       startVUs: 0,
       stages: [
-        { duration: '30s', target: 5 },
-        { duration: '1m', target: 10 },
-        { duration: '2m', target: 10 },
+        { duration: '30s', target: COMMUNITY_WRITE_WARMUP_VUS },
+        { duration: '1m', target: COMMUNITY_WRITE_PEAK_VUS },
+        { duration: '2m', target: COMMUNITY_WRITE_PEAK_VUS },
         { duration: '30s', target: 0 },
       ],
       exec: 'writeScenario',
