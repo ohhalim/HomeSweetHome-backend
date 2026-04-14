@@ -1,7 +1,6 @@
 import http from 'k6/http';
 import { check, sleep, group } from 'k6';
 import { Rate, Trend } from 'k6/metrics';
-import { SharedArray } from 'k6/data';
 
 // ============================================================
 // 설정
@@ -9,6 +8,12 @@ import { SharedArray } from 'k6/data';
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080';
 const API = `${BASE_URL}/api/v1/community`;
+const COMMUNITY_READ_WARMUP_VUS = Number(__ENV.COMMUNITY_READ_WARMUP_VUS || 80);
+const COMMUNITY_READ_PEAK_VUS = Number(__ENV.COMMUNITY_READ_PEAK_VUS || 200);
+const COMMUNITY_WRITE_WARMUP_VUS = Number(__ENV.COMMUNITY_WRITE_WARMUP_VUS || 20);
+const COMMUNITY_WRITE_PEAK_VUS = Number(__ENV.COMMUNITY_WRITE_PEAK_VUS || 40);
+const COMMUNITY_LIST_PAGE_BOUND = Math.max(1, Number(__ENV.COMMUNITY_LIST_PAGE_BOUND || 3));
+const COMMUNITY_USER_ID_MAX = Math.max(1, Number(__ENV.COMMUNITY_USER_ID_MAX || 10));
 
 // 커스텀 메트릭
 const errorRate = new Rate('errors');
@@ -28,9 +33,9 @@ export const options = {
       executor: 'ramping-vus',
       startVUs: 0,
       stages: [
-        { duration: '30s', target: 20 },  // 웜업
-        { duration: '1m', target: 50 },   // 부하 증가
-        { duration: '2m', target: 50 },   // 유지
+        { duration: '30s', target: COMMUNITY_READ_WARMUP_VUS },  // 웜업
+        { duration: '1m', target: COMMUNITY_READ_PEAK_VUS },     // 부하 증가
+        { duration: '2m', target: COMMUNITY_READ_PEAK_VUS },     // 유지
         { duration: '30s', target: 0 },   // 정리
       ],
       exec: 'readScenario',
@@ -40,9 +45,9 @@ export const options = {
       executor: 'ramping-vus',
       startVUs: 0,
       stages: [
-        { duration: '30s', target: 5 },
-        { duration: '1m', target: 10 },
-        { duration: '2m', target: 10 },
+        { duration: '30s', target: COMMUNITY_WRITE_WARMUP_VUS },
+        { duration: '1m', target: COMMUNITY_WRITE_PEAK_VUS },
+        { duration: '2m', target: COMMUNITY_WRITE_PEAK_VUS },
         { duration: '30s', target: 0 },
       ],
       exec: 'writeScenario',
@@ -63,26 +68,7 @@ export const options = {
 const headers = { 'Content-Type': 'application/json' };
 
 function randomUserId() {
-  return Math.floor(Math.random() * 10) + 1;
-}
-
-/**
- * 목록 API에서 실제 존재하는 postId 목록을 가져온다.
- * 실패하면 빈 배열을 반환한다.
- */
-function fetchExistingPostIds() {
-  const res = http.get(`${API}/posts?page=0&size=50`);
-  if (res.status === 200) {
-    try {
-      const body = JSON.parse(res.body);
-      // Spring Page 응답: { content: [...], ... }
-      const content = body.content || [];
-      return content.map((p) => p.postId).filter((id) => id != null);
-    } catch (_) {
-      return [];
-    }
-  }
-  return [];
+  return Math.floor(Math.random() * COMMUNITY_USER_ID_MAX) + 1;
 }
 
 /**
@@ -102,7 +88,7 @@ export function readScenario() {
   let postIds = [];
 
   group('게시글 목록 조회', () => {
-    const page = Math.floor(Math.random() * 3);
+    const page = Math.floor(Math.random() * COMMUNITY_LIST_PAGE_BOUND);
     const res = http.get(`${API}/posts?page=${page}&size=10`);
     postListLatency.add(res.timings.duration);
     const ok = check(res, { '목록 조회 200': (r) => r.status === 200 });
