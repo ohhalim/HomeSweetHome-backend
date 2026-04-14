@@ -17,6 +17,7 @@ import com.homesweet.homesweetback.domain.product.product.command.repository.jpa
 import com.homesweet.homesweetback.domain.product.product.command.repository.jpa.entity.SkuEntity;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -30,6 +31,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /**
@@ -48,11 +50,15 @@ public class OrderServiceImpl implements OrderService {
     private static final int SHIPPING_REQUEST_MAX_LENGTH = 500;
     private static final int DEFAULT_ORDER_LIST_SIZE = 20;
     private static final int MAX_ORDER_LIST_SIZE = 100;
+    private static final String ORDER_PERF_LOG_PREFIX = "[ORDER-PERF]";
 
     private final OrderRepository orderRepository;
     private final CartJPARepository cartJPARepository;
     private final SkuJPARepository skuJPARepository;
     private final UserRepository userRepository;
+
+    @Value("${order.observability.slow-threshold-ms:500}")
+    private long slowThresholdMs;
 
     /**
      * 주문 생성
@@ -61,6 +67,7 @@ public class OrderServiceImpl implements OrderService {
     @Override
     @Transactional
     public OrderResponse createFromCart(Long userId, CreateOrderRequest request) {
+        long transactionStart = System.nanoTime();
         if (request == null) {
             throw new IllegalArgumentException("주문 요청이 비어 있습니다.");
         }
@@ -80,7 +87,9 @@ public class OrderServiceImpl implements OrderService {
         Map<Long, SkuEntity> skuMap = loadSkuMap(skuQuantitiesById.keySet().stream().toList());
         long totalAmount = calculateTotalAmount(skuQuantitiesById, skuMap);
 
+        long reserveStockStart = System.nanoTime();
         reserveStock(skuQuantitiesById);
+        long reserveStockMs = elapsedMillis(reserveStockStart);
 
         Order order = Order.builder()
                 .user(user)
@@ -109,9 +118,13 @@ public class OrderServiceImpl implements OrderService {
             order.addOrderItem(orderItem);
         }
 
+        long persistStart = System.nanoTime();
         Order savedOrder = orderRepository.save(order);
+        long persistMs = elapsedMillis(persistStart);
+        long businessMs = elapsedMillis(transactionStart);
         log.info("주문 생성 완료: orderId={}, orderNumber={}, totalAmount={}",
                 savedOrder.getId(), savedOrder.getOrderNumber(), savedOrder.getTotalAmount());
+        logSlowCreateTransaction(userId, savedOrder.getOrderNumber(), skuQuantitiesById, reserveStockMs, persistMs, businessMs);
 
         return OrderResponse.from(savedOrder);
     }
@@ -159,6 +172,7 @@ public class OrderServiceImpl implements OrderService {
     @Override
     @Transactional
     public void cancelOrder(Long orderId, Long userId) {
+        long transactionStart = System.nanoTime();
         Order order = orderRepository.findByIdWithItems(orderId)
                 .orElseThrow(() -> new OrderNotFoundException("주문을 찾을 수 없습니다. orderId=" + orderId));
 
@@ -171,10 +185,14 @@ public class OrderServiceImpl implements OrderService {
         }
 
         // 재고 복원
+        long restoreStockStart = System.nanoTime();
         restoreStock(order);
+        long restoreStockMs = elapsedMillis(restoreStockStart);
 
         order.cancel();
+        long businessMs = elapsedMillis(transactionStart);
         log.info("주문 취소 완료: orderId={}", orderId);
+        logSlowCancelTransaction(userId, orderId, order, restoreStockMs, businessMs);
     }
 
     /**
@@ -182,7 +200,10 @@ public class OrderServiceImpl implements OrderService {
      */
     private void restoreStock(Order order) {
         for (OrderItem item : order.getOrderItems()) {
+            long stockUpdateStart = System.nanoTime();
             skuJPARepository.increaseStock(item.getSku().getId(), item.getQuantity());
+            long stockUpdateMs = elapsedMillis(stockUpdateStart);
+            logSlowStockMutation("increase", item.getSku().getId(), item.getQuantity(), stockUpdateMs, 1);
             log.info("재고 복원: skuId={}, quantity={}", item.getSku().getId(), item.getQuantity());
         }
     }
@@ -297,7 +318,10 @@ public class OrderServiceImpl implements OrderService {
             for (Map.Entry<Long, Integer> entry : skuQuantitiesById.entrySet()) {
                 Long skuId = entry.getKey();
                 long quantity = entry.getValue().longValue();
+                long stockUpdateStart = System.nanoTime();
                 int updatedRows = skuJPARepository.decreaseStock(skuId, quantity);
+                long stockUpdateMs = elapsedMillis(stockUpdateStart);
+                logSlowStockMutation("decrease", skuId, quantity, stockUpdateMs, updatedRows);
                 if (updatedRows == 0) {
                     throw new StockInsufficientException(
                             "재고가 부족합니다. (SKU: " + skuId + ", 요청 수량: " + quantity + ")");
@@ -354,6 +378,54 @@ public class OrderServiceImpl implements OrderService {
         if (value.length() > maxLength) {
             throw new IllegalArgumentException(message);
         }
+    }
+
+    private long elapsedMillis(long startNanos) {
+        return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos);
+    }
+
+    private void logSlowStockMutation(String action, Long skuId, Long quantity, long durationMs, int updatedRows) {
+        if (durationMs < slowThresholdMs) {
+            return;
+        }
+        log.warn(
+                "{} stock-update slow action={}, skuId={}, quantity={}, durationMs={}, updatedRows={}",
+                ORDER_PERF_LOG_PREFIX, action, skuId, quantity, durationMs, updatedRows
+        );
+    }
+
+    private void logSlowCreateTransaction(
+            Long userId,
+            String orderNumber,
+            Map<Long, Integer> skuQuantitiesById,
+            long reserveStockMs,
+            long persistMs,
+            long businessMs
+    ) {
+        if (reserveStockMs < slowThresholdMs && businessMs < slowThresholdMs) {
+            return;
+        }
+        log.warn(
+                "{} create slow userId={}, orderNumber={}, skuQuantities={}, reserveStockMs={}, persistMs={}, businessMs={}",
+                ORDER_PERF_LOG_PREFIX, userId, orderNumber, skuQuantitiesById, reserveStockMs, persistMs, businessMs
+        );
+    }
+
+    private void logSlowCancelTransaction(Long userId, Long orderId, Order order, long restoreStockMs, long businessMs) {
+        if (restoreStockMs < slowThresholdMs && businessMs < slowThresholdMs) {
+            return;
+        }
+        Map<Long, Long> restoreQuantities = order.getOrderItems().stream()
+                .collect(Collectors.toMap(
+                        item -> item.getSku().getId(),
+                        OrderItem::getQuantity,
+                        Long::sum,
+                        LinkedHashMap::new
+                ));
+        log.warn(
+                "{} cancel slow userId={}, orderId={}, skuQuantities={}, restoreStockMs={}, businessMs={}",
+                ORDER_PERF_LOG_PREFIX, userId, orderId, restoreQuantities, restoreStockMs, businessMs
+        );
     }
 
     /**
