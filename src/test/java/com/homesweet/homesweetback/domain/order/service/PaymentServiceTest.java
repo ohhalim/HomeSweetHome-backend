@@ -34,7 +34,9 @@ import com.homesweet.homesweetback.domain.order.entity.Payment;
 import com.homesweet.homesweetback.domain.order.entity.PaymentStatus;
 import com.homesweet.homesweetback.domain.order.repository.OrderRepository;
 import com.homesweet.homesweetback.domain.order.repository.PaymentRepository;
+import com.homesweet.homesweetback.domain.order.service.StockCacheService;
 import com.homesweet.homesweetback.domain.product.cart.repository.jpa.CartJPARepository;
+import org.springframework.context.ApplicationEventPublisher;
 
 /**
  * PaymentService 단위 테스트
@@ -55,6 +57,12 @@ class PaymentServiceTest {
 
     @Mock
     private CartJPARepository cartJPARepository;
+
+    @Mock
+    private StockCacheService stockCacheService;
+
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
 
     @InjectMocks
     private PaymentServiceImpl paymentService;

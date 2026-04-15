@@ -18,6 +18,7 @@ import com.homesweet.homesweetback.domain.product.product.command.repository.jpa
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -57,6 +58,7 @@ public class OrderServiceImpl implements OrderService {
     private final SkuJPARepository skuJPARepository;
     private final UserRepository userRepository;
     private final StockCacheService stockCacheService;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Value("${order.observability.slow-threshold-ms:500}")
     private long slowThresholdMs;
@@ -207,6 +209,7 @@ public class OrderServiceImpl implements OrderService {
 
             // Redis 원자적 복원만 — DB row lock 완전 제거
             stockCacheService.restore(skuId, quantity);
+            eventPublisher.publishEvent(StockDeltaEvent.increase(skuId, quantity));
 
             long stockUpdateMs = elapsedMillis(stockUpdateStart);
             logSlowStockMutation("increase", skuId, quantity, stockUpdateMs, 1);
@@ -329,6 +332,7 @@ public class OrderServiceImpl implements OrderService {
                 // Redis 원자적 차감만 — DB row lock 완전 제거
                 stockCacheService.decrease(skuId, quantity);
                 decreasedEntries.add(entry);
+                eventPublisher.publishEvent(StockDeltaEvent.decrease(skuId, quantity));
 
                 long stockUpdateMs = elapsedMillis(stockUpdateStart);
                 logSlowStockMutation("decrease", skuId, quantity, stockUpdateMs, 1);
