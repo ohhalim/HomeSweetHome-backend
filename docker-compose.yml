@@ -1,11 +1,12 @@
 services:
   spring:
-    image: ohhalim/homesweet-commu:3.7
+    image: ohhalim/homesweet-commu:4
     container_name: homesweet-backend
     env_file:
       - .env
     environment:
       - SPRING_PROFILES_ACTIVE=prod
+      - ORDER_OBSERVABILITY_SLOW_THRESHOLD_MS=50
     network_mode: host
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
