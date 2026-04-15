@@ -96,4 +96,27 @@ public class AsyncConfig {
         executor.initialize();
         return executor;
     }
+
+    /**
+     * 재고 DB 동기화 전용 스레드 풀
+     *
+     * AFTER_COMMIT 리스너를 비동기로 실행해 요청 스레드의 HikariCP 커넥션을
+     * 먼저 반환한 뒤 별도 스레드에서 DB sync를 처리한다.
+     * REQUIRES_NEW를 요청 스레드에서 쓰면 커넥션을 2개 잡아 풀 고갈이 발생한다.
+     */
+    @Bean(name = "stockSyncExecutor")
+    public Executor stockSyncExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(5);
+        executor.setMaxPoolSize(10);
+        executor.setQueueCapacity(200);
+        executor.setThreadNamePrefix("stock-sync-");
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(60);
+        executor.setRejectedExecutionHandler((r, executor1) -> {
+            log.error("[STOCK-SYNC] stockSyncExecutor 큐 포화 — DB sync 유실. reconciliation 필요.");
+        });
+        executor.initialize();
+        return executor;
+    }
 }

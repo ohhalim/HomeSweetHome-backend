@@ -13,6 +13,7 @@ import com.homesweet.homesweetback.domain.order.repository.PaymentRepository;
 import com.homesweet.homesweetback.domain.product.cart.repository.jpa.CartJPARepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -40,6 +41,8 @@ public class PaymentServiceImpl implements PaymentService {
     private final PaymentRepository paymentRepository;
     private final OrderRepository orderRepository;
     private final CartJPARepository cartJPARepository;
+    private final StockCacheService stockCacheService;
+    private final ApplicationEventPublisher eventPublisher;
 
     /**
      * 결제 승인 처리
@@ -133,9 +136,15 @@ public class PaymentServiceImpl implements PaymentService {
 
         if (fullCancel) {
             payment.cancel();
-            // 주문 취소 + 재고 복원
             Order order = payment.getOrder();
             order.cancel();
+            // 재고 Redis 복원 + DB sync 이벤트 발행
+            order.getOrderItems().forEach(item -> {
+                Long skuId = item.getSku().getId();
+                long qty = item.getQuantity();
+                stockCacheService.restore(skuId, qty);
+                eventPublisher.publishEvent(StockDeltaEvent.increase(skuId, qty));
+            });
         } else {
             payment.partialCancel();
         }

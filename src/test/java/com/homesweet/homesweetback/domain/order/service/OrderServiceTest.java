@@ -41,6 +41,7 @@ import com.homesweet.homesweetback.domain.product.product.command.repository.jpa
 import com.homesweet.homesweetback.domain.product.product.command.repository.jpa.entity.ProductEntity;
 import com.homesweet.homesweetback.domain.product.product.command.repository.jpa.entity.SkuEntity;
 import com.homesweet.homesweetback.domain.order.service.StockCacheService;
+import org.springframework.context.ApplicationEventPublisher;
 
 /**
  * OrderService 단위 테스트
@@ -74,6 +75,9 @@ class OrderServiceTest {
 
     @Mock
     private StockCacheService stockCacheService;
+
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
 
     @InjectMocks
     private OrderServiceImpl orderService;
