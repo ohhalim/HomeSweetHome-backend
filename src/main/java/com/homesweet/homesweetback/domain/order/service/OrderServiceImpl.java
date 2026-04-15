@@ -56,6 +56,7 @@ public class OrderServiceImpl implements OrderService {
     private final CartJPARepository cartJPARepository;
     private final SkuJPARepository skuJPARepository;
     private final UserRepository userRepository;
+    private final StockCacheService stockCacheService;
 
     @Value("${order.observability.slow-threshold-ms:500}")
     private long slowThresholdMs;
@@ -200,11 +201,16 @@ public class OrderServiceImpl implements OrderService {
      */
     private void restoreStock(Order order) {
         for (OrderItem item : order.getOrderItems()) {
+            Long skuId = item.getSku().getId();
+            long quantity = item.getQuantity();
             long stockUpdateStart = System.nanoTime();
-            skuJPARepository.increaseStock(item.getSku().getId(), item.getQuantity());
+
+            // Redis 원자적 복원만 — DB row lock 완전 제거
+            stockCacheService.restore(skuId, quantity);
+
             long stockUpdateMs = elapsedMillis(stockUpdateStart);
-            logSlowStockMutation("increase", item.getSku().getId(), item.getQuantity(), stockUpdateMs, 1);
-            log.info("재고 복원: skuId={}, quantity={}", item.getSku().getId(), item.getQuantity());
+            logSlowStockMutation("increase", skuId, quantity, stockUpdateMs, 1);
+            log.info("재고 복원: skuId={}, quantity={}", skuId, quantity);
         }
     }
 
@@ -313,24 +319,27 @@ public class OrderServiceImpl implements OrderService {
     }
 
     private void reserveStock(Map<Long, Integer> skuQuantitiesById) {
-        List<Map.Entry<Long, Integer>> deductedEntries = new ArrayList<>();
+        List<Map.Entry<Long, Integer>> decreasedEntries = new ArrayList<>();
         try {
             for (Map.Entry<Long, Integer> entry : skuQuantitiesById.entrySet()) {
                 Long skuId = entry.getKey();
                 long quantity = entry.getValue().longValue();
                 long stockUpdateStart = System.nanoTime();
-                int updatedRows = skuJPARepository.decreaseStock(skuId, quantity);
+
+                // Redis 원자적 차감만 — DB row lock 완전 제거
+                stockCacheService.decrease(skuId, quantity);
+                decreasedEntries.add(entry);
+
                 long stockUpdateMs = elapsedMillis(stockUpdateStart);
-                logSlowStockMutation("decrease", skuId, quantity, stockUpdateMs, updatedRows);
-                if (updatedRows == 0) {
-                    throw new StockInsufficientException(
-                            "재고가 부족합니다. (SKU: " + skuId + ", 요청 수량: " + quantity + ")");
-                }
-                deductedEntries.add(entry);
+                logSlowStockMutation("decrease", skuId, quantity, stockUpdateMs, 1);
             }
         } catch (StockInsufficientException e) {
-            for (Map.Entry<Long, Integer> deducted : deductedEntries) {
-                skuJPARepository.increaseStock(deducted.getKey(), deducted.getValue().longValue());
+            // Redis 롤백은 StockCacheService.decrease() 내부에서 처리됨
+            throw e;
+        } catch (Exception e) {
+            // 예기치 못한 예외: Redis 되돌리기
+            for (Map.Entry<Long, Integer> decreased : decreasedEntries) {
+                stockCacheService.restore(decreased.getKey(), decreased.getValue().longValue());
             }
             throw e;
         }
