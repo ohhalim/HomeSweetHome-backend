@@ -29,4 +29,13 @@ public interface SkuJPARepository extends JpaRepository<SkuEntity, Long> {
     @Query("UPDATE SkuEntity s SET s.stockQuantity = s.stockQuantity + :quantity "
             + "WHERE s.id = :skuId")
     int increaseStock(@Param("skuId") Long skuId, @Param("quantity") Long quantity);
+        
+    /**
+     * 재고 가용성 체크 없이 단순 차감 (Redis가 이미 검증한 경우 사용).
+     * WHERE 조건에 stock >= quantity 가 없으므로 row lock 대기 없이 빠르게 완료된다.
+     */
+    @Modifying
+    @Query("UPDATE SkuEntity s SET s.stockQuantity = s.stockQuantity - :quantity "
+            + "WHERE s.id = :skuId")
+    int decreaseStockDirect(@Param("skuId") Long skuId, @Param("quantity") Long quantity);
 }
