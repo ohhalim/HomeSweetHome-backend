@@ -40,6 +40,7 @@ import com.homesweet.homesweetback.domain.product.cart.repository.jpa.entity.Car
 import com.homesweet.homesweetback.domain.product.product.command.repository.jpa.SkuJPARepository;
 import com.homesweet.homesweetback.domain.product.product.command.repository.jpa.entity.ProductEntity;
 import com.homesweet.homesweetback.domain.product.product.command.repository.jpa.entity.SkuEntity;
+import com.homesweet.homesweetback.domain.order.service.StockCacheService;
 
 /**
  * OrderService 단위 테스트
@@ -70,6 +71,9 @@ class OrderServiceTest {
 
     @Mock
     private UserRepository userRepository;
+
+    @Mock
+    private StockCacheService stockCacheService;
 
     @InjectMocks
     private OrderServiceImpl orderService;
@@ -192,8 +196,6 @@ class OrderServiceTest {
             given(cartJPARepository.findAllByUserIdAndIdInWithSkuAndProduct(userId, List.of(1L, 2L)))
                     .willReturn(List.of(cart1, cart2));
             given(skuJPARepository.findAllByIdWithProduct(List.of(1L, 2L))).willReturn(List.of(sku1, sku2));
-            given(skuJPARepository.decreaseStock(1L, 2L)).willReturn(1);
-            given(skuJPARepository.decreaseStock(2L, 1L)).willReturn(1);
             given(orderRepository.save(any(Order.class))).willAnswer(invocation -> invocation.getArgument(0));
 
             OrderResponse response = orderService.createFromCart(userId, request);
@@ -224,7 +226,6 @@ class OrderServiceTest {
 
             given(userRepository.findById(userId)).willReturn(Optional.of(user));
             given(skuJPARepository.findAllByIdWithProduct(List.of(1L))).willReturn(List.of(sku1));
-            given(skuJPARepository.decreaseStock(1L, 3L)).willReturn(1);
             given(orderRepository.save(any(Order.class))).willAnswer(invocation -> invocation.getArgument(0));
 
             OrderResponse response = orderService.createFromCart(userId, request);
@@ -249,7 +250,6 @@ class OrderServiceTest {
 
             given(userRepository.findById(userId)).willReturn(Optional.of(user));
             given(skuJPARepository.findAllByIdWithProduct(List.of(1L))).willReturn(List.of(sku1));
-            given(skuJPARepository.decreaseStock(1L, 1L)).willReturn(1);
             given(orderRepository.save(any(Order.class))).willAnswer(invocation -> invocation.getArgument(0));
 
             OrderResponse response = orderService.createFromCart(userId, request);
@@ -440,7 +440,7 @@ class OrderServiceTest {
             orderService.cancelOrder(orderId, userId);
 
             assertThat(order.getStatus()).isEqualTo(OrderStatus.CANCELLED);
-            verify(skuJPARepository).increaseStock(1L, 2L);
+            verify(stockCacheService).restore(1L, 2L);
         }
 
         @Test
