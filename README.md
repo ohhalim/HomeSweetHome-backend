@@ -1,4 +1,4 @@
-# 개발 사이클에 맞춰 성능을 개선한 이커머스 프로젝트, HomeSweetHome
+# 병목을 측정하고 구조적으로 개선한 이커머스 백엔드 프로젝트, HomeSweetHome
 
 <img width="975" height="549" alt="HomeSweetHome 대표 이미지" src="https://github.com/user-attachments/assets/57f5dfbf-a606-4bf6-b4f6-c4938a7e3598" />
 
@@ -12,8 +12,34 @@ https://www.youtube.com/watch?v=tDZQVn2-uPs
 
 ## 🔖 프로젝트 개요
 
-- 주제 : 국내 홈리빙 이커머스 서비스를 벤치마킹하여, 주문·결제와 커뮤니티 핵심 기능을 구현하고 성능을 개선한 프로젝트
-- 개발 프로세스 : 기획 및 MVP 구축 → 단위/통합/부하 테스트 기반 병목 분석 → 개선 적용 및 재검증 반복
+- 국내 홈리빙 이커머스 서비스를 벤치마킹해 주문·결제와 커뮤니티 핵심 기능을 구현하고, 병목 구간을 실측 기반으로 개선한 백엔드 프로젝트입니다.
+- 단순 기능 구현에 그치지 않고, `동시성`, `정합성`, `성능`, `운영 관측성` 문제를 재현하고 구조적으로 해결하는 과정을 프로젝트 중심에 두었습니다.
+- 개발 방식은 `기획 및 MVP 구축 → 단위/통합/부하 테스트로 병목 재현 → 원인 분석 → 구조 개선 → 재측정` 사이클로 운영했습니다.
+
+---
+
+## 🙋 제가 맡아 집중한 영역
+
+- **주문/결제** : 재고 차감 경로 최적화, 결제 멱등성, 주문 단위 락, 보상 취소, 결제 취소 재고 정합성 개선
+- **커뮤니티** : 조회수/댓글수/좋아요 카운터 구조 개선, 데드락 해소, Redis 캐시·배치 동기화·벌크 조회 최적화
+- **성능/운영** : k6 부하 테스트, Grafana/HikariCP/DB `PROCESSLIST` 기반 병목 분석, Tomcat backlog 및 커넥션 풀 튜닝
+
+---
+
+## 📈 대표 성과
+
+- 주문 재고 차감 경로의 DB row lock 병목을 Redis 원자 연산 기반 재고 캐시로 전환해 주문 생성 p95를 **1.68s → 1.09s**로 줄이고, 처리량을 **241 → 401 req/s(66%)** 개선
+- 주문 목록 조회 API의 전체 `JOIN FETCH` 구조를 페이징 + 2단계 조회 방식으로 리팩터링해 `order_list` p95를 **712ms → 25.9ms(약 96%)** 개선
+- `AFTER_COMMIT + REQUIRES_NEW` 기반 재고 동기화에서 발생한 커넥션 풀 고갈 문제를 `@Async` 기반 비동기 DB sync 구조로 재설계해 주문 생성 p95를 **58.3s → 552ms**, 오류율을 **14.8% → 0%**로 안정화
+- 결제 전체 취소 시 재고 복원이 누락되던 버그를 수정해 취소 후 재고가 영구 차감되는 문제를 해결하고, 주문/결제 취소 경로의 재고 정합성을 보강
+
+---
+
+## 🧠 이 프로젝트에서 보여주고 싶은 역량
+
+- **원인 분석 능력** : 성능 저하를 단순히 “느리다” 수준에서 보지 않고, `row lock`, `deadlock`, `connection pool contention`, `TCP backlog`처럼 시스템 레벨 원인까지 좁혀 해결했습니다.
+- **구조 개선 능력** : Redis 원자 연산, Lua Script, Cache-Aside, Write-Behind, 비동기 이벤트, 페이징 + 2단계 조회처럼 문제에 맞는 구조를 선택해 적용했습니다.
+- **측정 기반 개선 방식** : k6, Grafana, DB `PROCESSLIST`, HikariCP, Spring Actuator를 함께 활용해 가설 수립 → 재현 → 개선 → 재검증 사이클을 반복했습니다.
 
 ---
 
@@ -29,7 +55,7 @@ https://www.youtube.com/watch?v=tDZQVn2-uPs
 
 ---
 
-## 🔗 담당 핵심 기능 (대표 기능 중심)
+## 🔗 제가 구현·개선한 핵심 기능
 
 ### 1️⃣ 주문 및 결제 시스템
 
@@ -96,7 +122,54 @@ https://www.youtube.com/watch?v=tDZQVn2-uPs
 
 ---
 
-### 3️⃣ 커뮤니티 1차 성능 개선 - 데드락 문제 해결
+### 3️⃣ 주문 시스템 1차 성능 개선 - 재고 차감 경로 병목 제거
+
+#### 문제 상황
+
+- 단일 SKU 동시 주문 시 `UPDATE sku SET stock_quantity = stock_quantity - 1 ...` 쿼리에 InnoDB row lock이 집중
+- 재고 차감 쿼리가 직렬화되면서 커넥션 점유 시간이 길어지고, 주문 생성 p95가 **1.68s**까지 증가
+- HikariCP Pending과 DB 대기 쿼리가 함께 증가하며 처리량이 제한됨
+
+#### 해결 방법
+
+- `StockCacheService`를 도입해 주문 재고 차감/복원을 Redis `DECRBY`/`INCRBY` 기반 원자 연산으로 전환
+- `OrderServiceImpl.reserveStock()` / `restoreStock()`에서 DB UPDATE를 제거하고 Redis만 hot path에서 사용
+- Redis key miss 시 DB 값을 1회 로드하는 lazy init 적용
+- `SkuJPARepository.decreaseStockDirect()`를 추가해 이후 비동기 DB sync 경로를 준비
+
+#### 결과
+
+- 주문 생성 p95 개선 : **1.68s → 1.09s**
+- 처리량 개선 : **241 → 401 req/s (66%)**
+- DB row lock 대기와 커넥션 점유 시간이 감소하며 주문 생성 경로 병목 완화
+
+---
+
+### 4️⃣ 주문 시스템 2차 성능 개선 - 비동기 재고 동기화로 커넥션 풀 고갈 해결
+
+#### 문제 상황
+
+- Redis만 재고를 갱신하면서 DB `stock_quantity`가 stale 상태로 남아 서버 재시작 시 재고가 부풀 수 있는 구조적 문제가 존재
+- `AFTER_COMMIT + REQUIRES_NEW` 방식으로 DB 동기화를 시도했지만, Spring 커밋 라이프사이클상 기존 커넥션 반환 전 새 커넥션을 요청해 HikariCP 풀이 고갈
+- 단일 SKU 집중 부하에서 주문 생성 p95가 **58.3s**, 오류율이 **14.8%**까지 악화
+
+#### 해결 방법
+
+- Spring commit 순서를 분석해 병목 원인을 `connection pool contention`으로 특정
+- `@Async` 기반 `AFTER_COMMIT` 재고 동기화 구조로 변경해 요청 스레드와 DB sync 스레드를 분리
+- `PaymentServiceImpl` full cancel 경로에 Redis 재고 복원 + 이벤트 발행을 추가해 재고 복원 누락 버그 수정
+- k6, Grafana, DB `PROCESSLIST`, HikariCP 메트릭을 함께 활용해 재현과 검증을 반복
+
+#### 결과
+
+- 주문 생성 p95 개선 : **58.3s → 552ms**
+- 오류율 개선 : **14.8% → 0%**
+- `http p99` : **761ms**, HikariCP Pending : **0**
+- 주문/결제 취소 경로의 재고 정합성 보강
+
+---
+
+### 5️⃣ 커뮤니티 1차 성능 개선 - 데드락 문제 해결
 
 #### 문제 상황
 
@@ -125,7 +198,7 @@ https://www.youtube.com/watch?v=tDZQVn2-uPs
 
 ---
 
-### 4️⃣ 커뮤니티 2차 성능 개선 - Redis 기반 카운터 시스템 구축
+### 6️⃣ 커뮤니티 2차 성능 개선 - Redis 기반 카운터 시스템 구축
 
 #### 문제 상황
 
@@ -148,7 +221,7 @@ https://www.youtube.com/watch?v=tDZQVn2-uPs
 
 ---
 
-### 5️⃣ 커뮤니티 3차 성능 개선 - DB 쿼리 최적화 및 캐싱 전략
+### 7️⃣ 커뮤니티 3차 성능 개선 - DB 쿼리 최적화 및 캐싱 전략
 
 #### 문제 상황
 

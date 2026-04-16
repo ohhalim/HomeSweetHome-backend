@@ -24,7 +24,7 @@ spring:
       initialize-schema: always
   datasource:
     hikari:
-      maximum-pool-size: 30
+      maximum-pool-size: 50
       minimum-idle: 20
       idle-timeout: 300000
       max-lifetime: 1800000
