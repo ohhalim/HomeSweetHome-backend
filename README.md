@@ -26,20 +26,49 @@ https://www.youtube.com/watch?v=tDZQVn2-uPs
 
 ---
 
-## 📈 대표 성과
+## 🎯 목표
 
-- 주문 재고 차감 경로의 DB row lock 병목을 Redis 원자 연산 기반 재고 캐시로 전환해 주문 생성 p95를 **1.68s → 1.09s**로 줄이고, 처리량을 **241 → 401 req/s(66%)** 개선
-- 주문 목록 조회 API의 전체 `JOIN FETCH` 구조를 페이징 + 2단계 조회 방식으로 리팩터링해 `order_list` p95를 **712ms → 25.9ms(약 96%)** 개선
-- `AFTER_COMMIT + REQUIRES_NEW` 기반 재고 동기화에서 발생한 커넥션 풀 고갈 문제를 `@Async` 기반 비동기 DB sync 구조로 재설계해 주문 생성 p95를 **58.3s → 552ms**, 오류율을 **14.8% → 0%**로 안정화
-- 결제 전체 취소 시 재고 복원이 누락되던 버그를 수정해 취소 후 재고가 영구 차감되는 문제를 해결하고, 주문/결제 취소 경로의 재고 정합성을 보강
+| 목표 항목 | 기준 |
+| --- | --- |
+| 주문 생성 성능 | `order_create p95 < 800ms` |
+| API 안정성 | `http p99 < 1,000ms`, `error rate < 5%` |
+| 주문/결제 정합성 | 중복 결제 차단, 주문 단위 동시성 제어, 보상 취소 적용 |
+| 커뮤니티 정합성 | 조회수/댓글수/좋아요를 동시성 안전하게 처리 |
+| 병목 분석 방식 | k6 + Grafana + HikariCP + DB `PROCESSLIST` 기반 재현/측정 |
 
 ---
 
-## 🧠 이 프로젝트에서 보여주고 싶은 역량
+## 📊 최적화 결과
 
-- **원인 분석 능력** : 성능 저하를 단순히 “느리다” 수준에서 보지 않고, `row lock`, `deadlock`, `connection pool contention`, `TCP backlog`처럼 시스템 레벨 원인까지 좁혀 해결했습니다.
-- **구조 개선 능력** : Redis 원자 연산, Lua Script, Cache-Aside, Write-Behind, 비동기 이벤트, 페이징 + 2단계 조회처럼 문제에 맞는 구조를 선택해 적용했습니다.
-- **측정 기반 개선 방식** : k6, Grafana, DB `PROCESSLIST`, HikariCP, Spring Actuator를 함께 활용해 가설 수립 → 재현 → 개선 → 재검증 사이클을 반복했습니다.
+| 지표 | Before | After | 성과 |
+| --- | --- | --- | --- |
+| 주문 생성 p95 | `1.68s` | `1.09s` | **35% 단축** |
+| 주문 처리량 | `241 req/s` | `401 req/s` | **66% 증가** |
+| 주문 목록 조회 p95 | `712ms` | `25.9ms` | **96% 단축** |
+| 재고 동기화 구조 변경 후 주문 생성 p95 | `58.3s` | `552ms` | **99% 수준 단축** |
+| 재고 동기화 구조 변경 후 오류율 | `14.8%` | `0%` | **100% 개선** |
+| HikariCP Pending | 폭증 | `0` | **커넥션 풀 고갈 해소** |
+
+---
+
+## 🛡️ 정합성·장애 대응
+
+| 리스크 | 대응 전략 | 구현 |
+| --- | --- | --- |
+| 동일 결제 중복 요청 | Redis 멱등성 키(`paymentKey`)로 중복 승인 차단 | 직접 구현 |
+| 동일 주문 동시 결제 | Redis 주문 락 + Lua Script 기반 안전한 락 해제 | 직접 구현 |
+| 외부 PG 연동 오류 | 예외 분리 + Circuit Breaker + Retry 적용 | 직접 구현 |
+| 외부 승인 후 내부 저장 실패 | Compensation cancel로 상태 불일치 방지 | 직접 구현 |
+| 결제 전체 취소 시 재고 복원 누락 | Redis restore + 비동기 DB sync 이벤트 추가 | 직접 구현 |
+| 커뮤니티 카운터 동시성 | Redis/Lua/Write-Behind 구조로 정합성 유지 | 직접 구현 |
+
+---
+
+## 🧠 성능 최적화 접근 방식
+
+- **원인 분석** : 성능 저하를 단순히 “느리다”가 아니라 `row lock`, `deadlock`, `connection pool contention`, `TCP backlog` 수준까지 좁혀 해결했습니다.
+- **구조 개선** : Redis 원자 연산, Lua Script, Cache-Aside, Write-Behind, 비동기 이벤트, 페이징 + 2단계 조회 등 문제에 맞는 구조를 선택해 적용했습니다.
+- **재검증 문화** : k6, Grafana, DB `PROCESSLIST`, HikariCP, Spring Actuator로 가설 → 재현 → 개선 → 재측정을 반복했습니다.
 
 ---
 
@@ -75,7 +104,7 @@ https://www.youtube.com/watch?v=tDZQVn2-uPs
 
 ---
 
-## 🚀 개선 사항
+## 🚀 성능 최적화 과정
 
 ### 1️⃣ 결제 시스템 1차 개선 - 동시성 제어 및 정합성 강화
 
